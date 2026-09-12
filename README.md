@@ -83,3 +83,12 @@ flutter analyze
 flutter run -d linux      # Linux desktop
 flutter run -d windows    # Windows desktop
 ```
+
+---
+
+## License
+
+This project is licensed under the **GNU Affero General Public License v3.0 (or later)** (`AGPL-3.0-or-later`) with an Apple App Store & digital distribution exception under Section 7. See the [LICENSE](LICENSE) file for the full license text.
+
+### Dual-Licensing & App Store Distribution Notice (Method 2)
+The author and sole copyright holder, **Yehonatan Vishna**, reserves the unrestricted right to convey, compile, and distribute binary and source releases of this application through digital application stores (including the Apple App Store, Google Play Store, and Microsoft Store) under alternative distribution terms, commercial terms, or the Apple Standard EULA, without being bound or restricted by the terms of the GNU Affero General Public License.
