@@ -12,6 +12,7 @@ import '../../core/services/image_cache_service.dart';
 import '../sync/secure_storage_service.dart';
 import '../sync/sync_service.dart';
 import 'linux_mpris_service.dart';
+import 'podcast_widget_service.dart';
 
 typedef PositionUpdateEvent = ({String mediaUrl, int position, bool isPlayed});
 enum SleepTimerMode { none, duration, endOfEpisode }
@@ -68,6 +69,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       _initAudioSession();
       _initPlayerListeners();
       LinuxMprisService.instance.init(this);
+      PodcastWidgetService.instance.init(this);
     }
     _loadInitialQueue();
     _loadSeekDurations();
@@ -804,6 +806,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   void dispose() {
+    PodcastWidgetService.instance.dispose();
     _stopPeriodicPositionSync();
     _sleepTimer?.cancel();
     _playbackEventSub?.cancel();
