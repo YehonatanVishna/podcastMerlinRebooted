@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/database_helper.dart';
 import '../models/episode.dart';
 import '../models/podcast.dart';
+import '../models/gpodder_action.dart';
 import '../models/sync_status.dart';
 import '../services/image_cache_service.dart';
 import '../utils/error_formatter.dart';
@@ -374,7 +375,6 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
           hasMore: list.length >= fetchLimit,
           filter: currentFilter,
         );
-        ImageCacheService.precacheBatch(list.map((e) => e.imageUrl));
       }
     } catch (e) {
       if (mounted) {
@@ -431,6 +431,85 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
       state = state.copyWith(episodes: updatedList);
     }
     return newStarred;
+  }
+
+  Future<void> markAsPlayed(Episode episode, bool isPlayed) async {
+    int? epId = episode.id;
+    if (epId == null) {
+      final found = await _db.getEpisodeByGuid(episode.guid);
+      epId = found?.id;
+    }
+    if (epId == null) return;
+
+    final targetPos = isPlayed ? (episode.duration > 0 ? episode.duration : episode.position) : 0;
+    await _db.setEpisodePlayed(epId, isPlayed, position: targetPos);
+
+    if (episode.podcastRss.isNotEmpty) {
+      final action = GPodderAction(
+        podcast: episode.podcastRss,
+        episode: episode.mediaUrl,
+        guid: episode.guid,
+        action: 'play',
+        timestamp: DateTime.now(),
+        position: targetPos,
+        started: 0,
+        total: episode.duration,
+      );
+      await _db.enqueueAction(action);
+      _syncStatusNotifier.pushBacklog().catchError((_) => false);
+    }
+
+    if (mounted) {
+      final updatedList = state.episodes.map((e) {
+        if (e.id == epId || (e.guid.isNotEmpty && e.guid == episode.guid)) {
+          return e.copyWith(isPlayed: isPlayed, position: targetPos);
+        }
+        return e;
+      }).toList();
+      state = state.copyWith(episodes: updatedList);
+    }
+  }
+
+  Future<void> togglePlayed(Episode episode) async {
+    await markAsPlayed(episode, !episode.isFinished);
+  }
+
+  Future<void> markMultipleAsPlayed(List<Episode> episodes, bool isPlayed) async {
+    if (episodes.isEmpty) return;
+    final ids = episodes.map((e) => e.id).whereType<int>().toList();
+    if (ids.isEmpty) return;
+
+    await _db.markMultipleEpisodesPlayed(ids, isPlayed);
+
+    for (final ep in episodes) {
+      if (ep.podcastRss.isNotEmpty) {
+        final targetPos = isPlayed ? (ep.duration > 0 ? ep.duration : ep.position) : 0;
+        final action = GPodderAction(
+          podcast: ep.podcastRss,
+          episode: ep.mediaUrl,
+          guid: ep.guid,
+          action: 'play',
+          timestamp: DateTime.now(),
+          position: targetPos,
+          started: 0,
+          total: ep.duration,
+        );
+        await _db.enqueueAction(action);
+      }
+    }
+    _syncStatusNotifier.pushBacklog().catchError((_) => false);
+
+    if (mounted) {
+      final idSet = ids.toSet();
+      final updatedList = state.episodes.map((e) {
+        if (e.id != null && idSet.contains(e.id)) {
+          final targetPos = isPlayed ? (e.duration > 0 ? e.duration : e.position) : 0;
+          return e.copyWith(isPlayed: isPlayed, position: targetPos);
+        }
+        return e;
+      }).toList();
+      state = state.copyWith(episodes: updatedList);
+    }
   }
 
   Future<void> setFilter(EpisodeFilter filter) async {
@@ -544,4 +623,72 @@ final discoveryNotifierProvider =
     StateNotifierProvider<DiscoveryNotifier, DiscoveryState>((ref) {
   return DiscoveryNotifier(ref.watch(multisourceSearchServiceProvider));
 });
+
+class PlaybackHistoryState {
+  final List<Episode> history;
+  final bool isLoading;
+  final String? error;
+
+  const PlaybackHistoryState({
+    this.history = const [],
+    this.isLoading = false,
+    this.error,
+  });
+
+  PlaybackHistoryState copyWith({
+    List<Episode>? history,
+    bool? isLoading,
+    String? error,
+  }) {
+    return PlaybackHistoryState(
+      history: history ?? this.history,
+      isLoading: isLoading ?? this.isLoading,
+      error: error,
+    );
+  }
+}
+
+class PlaybackHistoryNotifier extends StateNotifier<PlaybackHistoryState> {
+  final DatabaseHelper _db;
+
+  PlaybackHistoryNotifier(this._db) : super(const PlaybackHistoryState(isLoading: true)) {
+    loadHistory();
+  }
+
+  Future<void> loadHistory() async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      final items = await _db.getPlaybackHistory(limit: 150);
+      if (mounted) {
+        state = PlaybackHistoryState(history: items, isLoading: false);
+      }
+    } catch (e) {
+      if (mounted) {
+        state = state.copyWith(isLoading: false, error: AppErrorFormatter.format(e));
+      }
+    }
+  }
+
+  Future<void> removeFromHistory(int episodeId) async {
+    await _db.removeEpisodeFromHistory(episodeId);
+    if (mounted) {
+      state = state.copyWith(
+        history: state.history.where((e) => e.id != episodeId).toList(),
+      );
+    }
+  }
+
+  Future<void> clearAllHistory() async {
+    await _db.clearPlaybackHistory();
+    if (mounted) {
+      state = const PlaybackHistoryState(history: [], isLoading: false);
+    }
+  }
+}
+
+final playbackHistoryProvider =
+    StateNotifierProvider.autoDispose<PlaybackHistoryNotifier, PlaybackHistoryState>((ref) {
+  return PlaybackHistoryNotifier(ref.watch(databaseProvider));
+});
+
 

@@ -892,6 +892,14 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     _currentEpisode = _currentEpisode!.copyWith(position: currentSec, isPlayed: isPlayed);
     await _db.updateEpisodePlaybackState(_currentEpisode!.mediaUrl, currentSec, isPlayed: isPlayed);
     await _db.saveActivePlayback(_currentEpisode!, position: currentSec, isCompleted: false);
+    if (_currentEpisode!.id != null && _currentEpisode!.id! > 0) {
+      await _db.recordPlaybackHistory(
+        _currentEpisode!.id!,
+        position: currentSec,
+        duration: totalSec,
+        completed: isPlayed,
+      );
+    }
     if (!_positionUpdateController.isClosed) {
       _positionUpdateController.add((mediaUrl: _currentEpisode!.mediaUrl, position: currentSec, isPlayed: isPlayed));
     }
@@ -935,6 +943,14 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     _lastSyncedPosition = totalSec;
     await _db.updateEpisodePlaybackState(_currentEpisode!.mediaUrl, totalSec, isPlayed: true);
     await _db.saveActivePlayback(_currentEpisode!, position: totalSec, isCompleted: true);
+    if (_currentEpisode!.id != null && _currentEpisode!.id! > 0) {
+      await _db.recordPlaybackHistory(
+        _currentEpisode!.id!,
+        position: totalSec,
+        duration: totalSec,
+        completed: true,
+      );
+    }
     if (!_positionUpdateController.isClosed) {
       _positionUpdateController.add((mediaUrl: _currentEpisode!.mediaUrl, position: totalSec, isPlayed: true));
     }

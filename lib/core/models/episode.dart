@@ -22,6 +22,7 @@ class Episode {
   final int downloadedBytes;
   final int totalBytes;
   final String? downloadError;
+  final DateTime? historyPlayedAt;
 
   const Episode({
     this.id,
@@ -43,6 +44,7 @@ class Episode {
     this.downloadedBytes = 0,
     this.totalBytes = 0,
     this.downloadError,
+    this.historyPlayedAt,
   });
 
   bool get isDownloaded => downloadStatus == DownloadStatus.downloaded && downloadPath != null;
@@ -88,6 +90,7 @@ class Episode {
     int? downloadedBytes,
     int? totalBytes,
     String? downloadError,
+    DateTime? historyPlayedAt,
     bool clearDownloadError = false,
     bool clearDownloadPath = false,
   }) {
@@ -111,6 +114,7 @@ class Episode {
       downloadedBytes: downloadedBytes ?? this.downloadedBytes,
       totalBytes: totalBytes ?? this.totalBytes,
       downloadError: clearDownloadError ? null : (downloadError ?? this.downloadError),
+      historyPlayedAt: historyPlayedAt ?? this.historyPlayedAt,
     );
   }
 
@@ -134,6 +138,7 @@ class Episode {
       'downloadedBytes': downloadedBytes,
       'totalBytes': totalBytes,
       'downloadError': downloadError,
+      if (historyPlayedAt != null) 'historyPlayedAt': historyPlayedAt?.toIso8601String(),
     };
   }
 
@@ -210,6 +215,9 @@ class Episode {
       downloadedBytes: _parseInt(map['downloadedBytes'] ?? map['downloaded_bytes']),
       totalBytes: _parseInt(map['totalBytes'] ?? map['total_bytes']),
       downloadError: (map['downloadError'] ?? map['download_error']) as String?,
+      historyPlayedAt: map['historyPlayedAt'] != null || map['history_played_at'] != null
+          ? DateTime.tryParse((map['historyPlayedAt'] ?? map['history_played_at']).toString())
+          : null,
     );
   }
 }

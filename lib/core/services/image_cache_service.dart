@@ -12,6 +12,7 @@ class ImageCacheService {
   ImageCacheService._();
 
   static Directory? _cacheDir;
+  static Completer<Directory>? _cacheDirCompleter;
   static final Dio _dio = Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 4),
@@ -21,7 +22,9 @@ class ImageCacheService {
 
   /// Resolves the persistent disk image cache directory in Application Support.
   static Future<Directory> _getCacheDir() async {
-    if (_cacheDir != null && await _cacheDir!.exists()) return _cacheDir!;
+    if (_cacheDir != null) return _cacheDir!;
+    if (_cacheDirCompleter != null) return _cacheDirCompleter!.future;
+    _cacheDirCompleter = Completer<Directory>();
     try {
       final appSupportDir = await getApplicationSupportDirectory();
       final dir = Directory(p.join(appSupportDir.path, 'persistent_image_cache'));
@@ -29,15 +32,23 @@ class ImageCacheService {
         await dir.create(recursive: true);
       }
       _cacheDir = dir;
+      _cacheDirCompleter!.complete(dir);
       return dir;
     } catch (_) {
-      final temp = await getTemporaryDirectory();
-      final dir = Directory(p.join(temp.path, 'persistent_image_cache'));
-      if (!await dir.exists()) {
-        await dir.create(recursive: true);
+      try {
+        final temp = await getTemporaryDirectory();
+        final dir = Directory(p.join(temp.path, 'persistent_image_cache'));
+        if (!await dir.exists()) {
+          await dir.create(recursive: true);
+        }
+        _cacheDir = dir;
+        _cacheDirCompleter!.complete(dir);
+        return dir;
+      } catch (e, st) {
+        _cacheDirCompleter!.completeError(e, st);
+        _cacheDirCompleter = null;
+        rethrow;
       }
-      _cacheDir = dir;
-      return dir;
     }
   }
 
