@@ -9,7 +9,7 @@ import 'playback_speed_sheet.dart';
 import 'queue_bottom_sheet.dart';
 import 'sleep_timer_bottom_sheet.dart';
 
-class NowPlayingSheet extends ConsumerWidget {
+class NowPlayingSheet extends ConsumerStatefulWidget {
   const NowPlayingSheet({super.key});
 
   static Future<void> show(BuildContext context) {
@@ -24,6 +24,13 @@ class NowPlayingSheet extends ConsumerWidget {
       builder: (_) => const NowPlayingSheet(),
     );
   }
+
+  @override
+  ConsumerState<NowPlayingSheet> createState() => _NowPlayingSheetState();
+}
+
+class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
+  double? _dragSeconds;
 
   String _formatDuration(Duration d) {
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -73,7 +80,7 @@ class NowPlayingSheet extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final audioHandler = ref.watch(audioHandlerProvider);
 
@@ -204,41 +211,61 @@ class NowPlayingSheet extends ConsumerWidget {
                           ],
                           const SizedBox(height: 16),
                           // Scrubber Slider
-                          SliderTheme(
-                            data: SliderTheme.of(context).copyWith(
-                              trackHeight: 4,
-                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-                            ),
-                            child: Slider(
-                              min: 0.0,
-                              max: maxSeconds.toDouble(),
-                              value: clampedSec,
-                              onChanged: (val) {
-                                audioHandler.seek(Duration(seconds: val.toInt()));
-                              },
-                            ),
-                          ),
-                          // Timestamps Row
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  _formatDuration(position),
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
+                          Builder(
+                            builder: (context) {
+                              final displaySec = (_dragSeconds ?? clampedSec).clamp(0.0, maxSeconds.toDouble());
+                              final displayPos = _dragSeconds != null
+                                  ? Duration(seconds: _dragSeconds!.round())
+                                  : position;
+                              return Column(
+                                children: [
+                                  SliderTheme(
+                                    data: SliderTheme.of(context).copyWith(
+                                      trackHeight: 4,
+                                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                                    ),
+                                    child: Slider(
+                                      min: 0.0,
+                                      max: maxSeconds.toDouble(),
+                                      value: displaySec,
+                                      onChanged: (val) {
+                                        setState(() {
+                                          _dragSeconds = val;
+                                        });
+                                      },
+                                      onChangeEnd: (val) {
+                                        audioHandler.seek(Duration(seconds: val.toInt()));
+                                        setState(() {
+                                          _dragSeconds = null;
+                                        });
+                                      },
+                                    ),
                                   ),
-                                ),
-                                Text(
-                                  _formatDuration(totalDuration),
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
+                                  // Timestamps Row
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          _formatDuration(displayPos),
+                                          style: theme.textTheme.bodySmall?.copyWith(
+                                            color: theme.colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                        Text(
+                                          _formatDuration(totalDuration),
+                                          style: theme.textTheme.bodySmall?.copyWith(
+                                            color: theme.colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
+                                ],
+                              );
+                            },
                           ),
                           const SizedBox(height: 12),
                           // Primary Playback Controls

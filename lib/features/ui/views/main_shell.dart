@@ -40,7 +40,7 @@ class MainShell extends ConsumerStatefulWidget {
   ConsumerState<MainShell> createState() => MainShellState();
 }
 
-class MainShellState extends ConsumerState<MainShell> {
+class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserver {
   final List<ShellNavigationState> _history = [
     const ShellNavigationState(selectedIndex: 0, selectedPodcast: null),
   ];
@@ -50,6 +50,7 @@ class MainShellState extends ConsumerState<MainShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _playbackErrorSub = ref.read(audioHandlerProvider).onPlaybackError.listen((errorMsg) {
         if (!mounted) return;
@@ -73,7 +74,17 @@ class MainShellState extends ConsumerState<MainShell> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      ref.read(audioHandlerProvider).flushCurrentPlaybackPosition();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _playbackErrorSub?.cancel();
     super.dispose();
   }

@@ -41,29 +41,61 @@ class PodcastWidgetService {
       final timeSinceLastSync = now.difference(_lastPositionUpdate).inSeconds;
       final isPlayingProgressTick = state.playing && timeSinceLastSync >= 20;
 
+      // When playing continuously, state.position advances alongside wall-clock time.
       // Detect non-linear seek/jump (e.g. widget skip forward/backward or user scrub)
-      final positionDiff =
-          ((state.position.inSeconds) - (oldState?.position.inSeconds ?? 0)).abs();
-      final positionJumped = positionDiff > 2;
+      final expectedProgress = state.playing ? timeSinceLastSync : 0;
+      final expectedPos = (oldState?.position.inSeconds ?? 0) + expectedProgress;
+      final deviation = ((state.position.inSeconds) - expectedPos).abs();
+      final positionJumped = deviation > 3;
 
       if (playingChanged || isPlayingProgressTick || positionJumped || _lastState == null) {
         _lastState = state;
         _lastPositionUpdate = now;
-        _triggerSync();
+        if (_lastItem != null) {
+          _triggerSync();
+        }
       }
     });
 
     _mediaItemSub = audioHandler.mediaItem.listen((item) {
       if (item != _lastItem) {
+        final wasNull = _lastItem == null;
         _lastItem = item;
-        _triggerSync();
+        if (item != null || !wasNull) {
+          _triggerSync();
+        }
       }
     });
 
-    // Initial sync
+    // Initial sync - only sync if active media item is present to prevent wiping widget data on cold start
     _lastState = audioHandler.playbackState.value;
     _lastItem = audioHandler.mediaItem.value;
-    _triggerSync();
+    if (_lastItem != null) {
+      _triggerSync();
+    }
+  }
+
+  /// Explicitly reset widget data to empty state when playback is cleared or finishes
+  Future<void> syncEmpty() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      _lastItem = null;
+      await Future.wait([
+        HomeWidget.saveWidgetData<String>('widget_title', 'Podcast Merlin'),
+        HomeWidget.saveWidgetData<String>('widget_podcast', 'No episode playing'),
+        HomeWidget.saveWidgetData<bool>('widget_is_playing', false),
+        HomeWidget.saveWidgetData<int>('widget_progress', 0),
+        HomeWidget.saveWidgetData<String?>('widget_artwork_path', null),
+      ]);
+      await HomeWidget.updateWidget(
+        name: _androidWidgetName,
+        qualifiedAndroidName: _androidQualifiedName,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('PodcastWidgetService syncEmpty error: $e');
+      }
+    }
   }
 
   /// Triggers a widget synchronization, re-queuing if an update is already in-flight.
