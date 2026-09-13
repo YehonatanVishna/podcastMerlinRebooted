@@ -1177,6 +1177,8 @@ class DatabaseHelper {
         duration: ep.duration,
         completed: true,
       );
+    } else {
+      await removeEpisodeFromHistory(episodeId);
     }
   }
 
@@ -1186,20 +1188,30 @@ class DatabaseHelper {
     await _detectColumnNames(db);
     final batch = db.batch();
     for (final id in episodeIds) {
-      batch.update(
-        'episodes',
-        {
-          _isPlayedCol: isPlayed ? 1 : 0,
-          if (!isPlayed) 'position': 0,
-        },
-        where: 'id = ?',
-        whereArgs: [id],
-      );
       if (isPlayed) {
+        batch.rawUpdate(
+          'UPDATE episodes SET $_isPlayedCol = 1, position = CASE WHEN duration > 0 THEN duration ELSE position END WHERE id = ?',
+          [id],
+        );
         batch.rawInsert('''
-          INSERT OR REPLACE INTO playback_history (episodeId, playedAt, position, duration, completed)
+          INSERT INTO playback_history (episodeId, playedAt, position, duration, completed)
           VALUES (?, ?, (SELECT duration FROM episodes WHERE id = ?), (SELECT duration FROM episodes WHERE id = ?), 1)
+          ON CONFLICT(episodeId) DO UPDATE SET
+            playedAt = excluded.playedAt,
+            position = excluded.position,
+            duration = CASE WHEN excluded.duration > 0 THEN excluded.duration ELSE duration END,
+            completed = 1
         ''', [id, DateTime.now().toIso8601String(), id, id]);
+      } else {
+        batch.rawUpdate(
+          'UPDATE episodes SET $_isPlayedCol = 0, position = 0 WHERE id = ?',
+          [id],
+        );
+        batch.delete(
+          'playback_history',
+          where: 'episodeId = ?',
+          whereArgs: [id],
+        );
       }
     }
     await batch.commit(noResult: true);
@@ -1223,7 +1235,7 @@ class DatabaseHelper {
           playedAt = excluded.playedAt,
           position = excluded.position,
           duration = CASE WHEN excluded.duration > 0 THEN excluded.duration ELSE duration END,
-          completed = CASE WHEN excluded.completed = 1 THEN 1 ELSE completed END
+          completed = excluded.completed
       ''', [
         episodeId,
         now,
@@ -1244,25 +1256,11 @@ class DatabaseHelper {
       JOIN episodes e ON h.episodeId = e.id
       LEFT JOIN podcasts p ON e.$_podcastIdCol = p.id
       ORDER BY h.playedAt DESC
-      LIMIT $limit OFFSET $offset
+      LIMIT ? OFFSET ?
     ''';
 
-    final maps = await db.rawQuery(query);
-    if (maps.isNotEmpty) {
-      return maps.map((m) => Episode.fromMap(m)).toList();
-    }
-
-    // Fallback if playback_history is still empty: get episodes that have playback progress or are played
-    final fallbackQuery = '''
-      SELECT e.*, p.$_podcastRssUrlCol AS podcastRss
-      FROM episodes e
-      LEFT JOIN podcasts p ON e.$_podcastIdCol = p.id
-      WHERE e.position > 0 OR e.$_isPlayedCol = 1
-      ORDER BY e.$_pubDateCol DESC
-      LIMIT $limit OFFSET $offset
-    ''';
-    final fallbackMaps = await db.rawQuery(fallbackQuery);
-    return fallbackMaps.map((m) => Episode.fromMap(m)).toList();
+    final maps = await db.rawQuery(query, [limit, offset]);
+    return maps.map((m) => Episode.fromMap(m)).toList();
   }
 
   Future<int> removeEpisodeFromHistory(int episodeId) async {
@@ -1650,6 +1648,28 @@ class DatabaseHelper {
   }
 
   Future<int> enqueueAction(GPodderAction action) async => queueGPodderAction(action);
+
+  Future<void> enqueueActionsBatch(List<GPodderAction> actions) async {
+    if (actions.isEmpty) return;
+    final db = await instance.database;
+    final batch = db.batch();
+    for (final action in actions) {
+      final map = action.toMap();
+      final adapted = <String, dynamic>{
+        'podcast': map['podcast'] ?? '',
+        'episode': map['episode'] ?? '',
+        'device': map['device'] ?? '',
+        'action': map['action'] ?? '',
+        'timestamp': map['timestamp'] ?? DateTime.now().toIso8601String(),
+        'started': map['started'] ?? 0,
+        'position': map['position'] ?? 0,
+        'total': map['total'] ?? 0,
+        'guid': map['guid'] ?? '',
+      };
+      batch.insert('gpodder_actions', adapted);
+    }
+    await batch.commit(noResult: true);
+  }
 
   Future<List<GPodderAction>> getQueuedGPodderActions() async {
     final db = await instance.database;

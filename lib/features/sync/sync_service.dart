@@ -18,6 +18,7 @@ class SyncService {
   String? lastError;
   List<String> lastFeedWarnings = [];
   bool _isPushingActions = false;
+  bool _needsRepush = false;
 
   SyncService({
     GPodderApiClient? apiClient,
@@ -33,6 +34,7 @@ class SyncService {
   Future<bool> performFullSync({
     SyncProgressCallback? onProgress,
     bool forceFullResync = false,
+    bool requireGpodder = false,
   }) async {
     lastError = null;
     lastFeedWarnings = [];
@@ -46,6 +48,10 @@ class SyncService {
         password != null && password.trim().isNotEmpty;
 
     if (!isGpodderConfigured) {
+      if (requireGpodder || forceFullResync) {
+        lastError = 'Server credentials not configured. Please enter server URL, username, and password in Settings.';
+        return false;
+      }
       // Local-only mode: refresh local podcast feeds directly without requiring gPodder
       onProgress?.call(SyncStage.fetchingFeed, 'Refreshing local subscriptions...');
       await _refreshLocalPodcastsDirectly(onProgress, isLocalOnlyMode: true);
@@ -260,7 +266,7 @@ class SyncService {
     } catch (e) {
       lastError = AppErrorFormatter.format(e);
       await _refreshLocalPodcastsDirectly(onProgress);
-      return true;
+      return false;
     }
   }
 
@@ -291,7 +297,10 @@ class SyncService {
         } catch (e) {
           final errStr = AppErrorFormatter.format(e);
           lastFeedWarnings.add('${pod.title} (${pod.rssUrl}): $errStr');
-          await _db.markPodcastDead(pod.rssUrl, errStr);
+          final errLower = errStr.toLowerCase();
+          if (!errLower.contains('database') && !errLower.contains('sqlite') && !errLower.contains('locked')) {
+            await _db.markPodcastDead(pod.rssUrl, errStr);
+          }
         } finally {
           refreshedCount++;
           onProgress?.call(
@@ -393,27 +402,36 @@ class SyncService {
 
   /// Pushes enqueued offline actions to server after collapsing duplicates
   Future<bool> _pushPendingActions(String serverUrl, String username, String password) async {
-    if (_isPushingActions) return true;
+    if (_isPushingActions) {
+      _needsRepush = true;
+      return true;
+    }
     _isPushingActions = true;
     try {
-      final pending = await _db.getPendingActions();
-      if (pending.isEmpty) return true;
+      while (true) {
+        _needsRepush = false;
+        final pending = await _db.getPendingActions();
+        if (pending.isEmpty) break;
 
-      final collapsed = _db.collapseActions(pending);
-      final success = await _apiClient.uploadEpisodeActions(
-        serverUrl: serverUrl,
-        username: username,
-        password: password,
-        actions: collapsed,
-      );
+        final collapsed = _db.collapseActions(pending);
+        final success = await _apiClient.uploadEpisodeActions(
+          serverUrl: serverUrl,
+          username: username,
+          password: password,
+          actions: collapsed,
+        );
 
-      if (success) {
-        final ids = pending.map((a) => a.id!).where((id) => id > 0).toList();
-        await _db.markActionsSynced(ids);
-      } else {
-        lastError = _apiClient.lastError ?? 'Failed to upload episode actions.';
+        if (success) {
+          final ids = pending.map((a) => a.id!).where((id) => id > 0).toList();
+          await _db.markActionsSynced(ids);
+        } else {
+          lastError = _apiClient.lastError ?? 'Failed to upload episode actions.';
+          return false;
+        }
+
+        if (!_needsRepush) break;
       }
-      return success;
+      return true;
     } finally {
       _isPushingActions = false;
     }

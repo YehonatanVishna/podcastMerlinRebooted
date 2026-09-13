@@ -892,9 +892,15 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     _currentEpisode = _currentEpisode!.copyWith(position: currentSec, isPlayed: isPlayed);
     await _db.updateEpisodePlaybackState(_currentEpisode!.mediaUrl, currentSec, isPlayed: isPlayed);
     await _db.saveActivePlayback(_currentEpisode!, position: currentSec, isCompleted: false);
-    if (_currentEpisode!.id != null && _currentEpisode!.id! > 0) {
+    int? epId = _currentEpisode!.id;
+    if (epId == null || epId <= 0) {
+      final found = await _db.getEpisodeByGuid(_currentEpisode!.guid) ??
+          await _db.getEpisodeByMediaUrl(_currentEpisode!.mediaUrl);
+      epId = found?.id;
+    }
+    if (epId != null && epId > 0) {
       await _db.recordPlaybackHistory(
-        _currentEpisode!.id!,
+        epId,
         position: currentSec,
         duration: totalSec,
         completed: isPlayed,
@@ -943,9 +949,15 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     _lastSyncedPosition = totalSec;
     await _db.updateEpisodePlaybackState(_currentEpisode!.mediaUrl, totalSec, isPlayed: true);
     await _db.saveActivePlayback(_currentEpisode!, position: totalSec, isCompleted: true);
-    if (_currentEpisode!.id != null && _currentEpisode!.id! > 0) {
+    int? epId = _currentEpisode!.id;
+    if (epId == null || epId <= 0) {
+      final found = await _db.getEpisodeByGuid(_currentEpisode!.guid) ??
+          await _db.getEpisodeByMediaUrl(_currentEpisode!.mediaUrl);
+      epId = found?.id;
+    }
+    if (epId != null && epId > 0) {
       await _db.recordPlaybackHistory(
-        _currentEpisode!.id!,
+        epId,
         position: totalSec,
         duration: totalSec,
         completed: true,

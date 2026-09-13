@@ -70,7 +70,7 @@ class SyncStatusNotifier extends StateNotifier<SyncStatusState> {
     state = state.copyWith(feedWarnings: const []);
   }
 
-  Future<bool> performFullSync({bool forceFullResync = false}) async {
+  Future<bool> performFullSync({bool forceFullResync = false, bool requireGpodder = false}) async {
     if (state.isSyncing) return false;
     state = const SyncStatusState(
       isSyncing: true,
@@ -83,6 +83,7 @@ class SyncStatusNotifier extends StateNotifier<SyncStatusState> {
     try {
       final success = await _sync.performFullSync(
         forceFullResync: forceFullResync,
+        requireGpodder: requireGpodder,
         onProgress: (stage, detail) {
           state = SyncStatusState(
             isSyncing: true,
@@ -481,10 +482,11 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
 
     await _db.markMultipleEpisodesPlayed(ids, isPlayed);
 
+    final actions = <GPodderAction>[];
     for (final ep in episodes) {
       if (ep.podcastRss.isNotEmpty) {
         final targetPos = isPlayed ? (ep.duration > 0 ? ep.duration : ep.position) : 0;
-        final action = GPodderAction(
+        actions.add(GPodderAction(
           podcast: ep.podcastRss,
           episode: ep.mediaUrl,
           guid: ep.guid,
@@ -493,11 +495,13 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
           position: targetPos,
           started: 0,
           total: ep.duration,
-        );
-        await _db.enqueueAction(action);
+        ));
       }
     }
-    _syncStatusNotifier.pushBacklog().catchError((_) => false);
+    if (actions.isNotEmpty) {
+      await _db.enqueueActionsBatch(actions);
+      _syncStatusNotifier.pushBacklog().catchError((_) => false);
+    }
 
     if (mounted) {
       final idSet = ids.toSet();
@@ -650,9 +654,34 @@ class PlaybackHistoryState {
 
 class PlaybackHistoryNotifier extends StateNotifier<PlaybackHistoryState> {
   final DatabaseHelper _db;
+  StreamSubscription? _posSub;
 
-  PlaybackHistoryNotifier(this._db) : super(const PlaybackHistoryState(isLoading: true)) {
+  PlaybackHistoryNotifier(this._db, [MerlinAudioHandler? audioHandler])
+      : super(const PlaybackHistoryState(isLoading: true)) {
     loadHistory();
+    if (audioHandler != null) {
+      _posSub = audioHandler.onPositionUpdated.listen((event) {
+        if (!mounted || state.history.isEmpty) return;
+        final idx = state.history.indexWhere((e) => e.mediaUrl == event.mediaUrl);
+        if (idx != -1) {
+          final current = state.history[idx];
+          if (current.position != event.position || current.isPlayed != event.isPlayed) {
+            final updated = List<Episode>.from(state.history);
+            updated[idx] = current.copyWith(
+              position: event.position,
+              isPlayed: event.isPlayed,
+            );
+            state = state.copyWith(history: updated);
+          }
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _posSub?.cancel();
+    super.dispose();
   }
 
   Future<void> loadHistory() async {
@@ -688,7 +717,11 @@ class PlaybackHistoryNotifier extends StateNotifier<PlaybackHistoryState> {
 
 final playbackHistoryProvider =
     StateNotifierProvider.autoDispose<PlaybackHistoryNotifier, PlaybackHistoryState>((ref) {
-  return PlaybackHistoryNotifier(ref.watch(databaseProvider));
+  MerlinAudioHandler? audioHandler;
+  try {
+    audioHandler = ref.watch(audioHandlerProvider);
+  } catch (_) {}
+  return PlaybackHistoryNotifier(ref.watch(databaseProvider), audioHandler);
 });
 
 

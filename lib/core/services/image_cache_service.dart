@@ -20,9 +20,11 @@ class ImageCacheService {
     ),
   );
 
+  static bool _cleanedOrphanedTmp = false;
+
   /// Resolves the persistent disk image cache directory in Application Support.
   static Future<Directory> _getCacheDir() async {
-    if (_cacheDir != null) return _cacheDir!;
+    if (_cacheDir != null && await _cacheDir!.exists()) return _cacheDir!;
     if (_cacheDirCompleter != null) return _cacheDirCompleter!.future;
     _cacheDirCompleter = Completer<Directory>();
     try {
@@ -33,6 +35,16 @@ class ImageCacheService {
       }
       _cacheDir = dir;
       _cacheDirCompleter!.complete(dir);
+      if (!_cleanedOrphanedTmp) {
+        _cleanedOrphanedTmp = true;
+        try {
+          dir.list().listen((entity) {
+            if (entity is File && entity.path.endsWith('.tmp')) {
+              entity.delete().catchError((_) => entity);
+            }
+          });
+        } catch (_) {}
+      }
       return dir;
     } catch (_) {
       try {
@@ -46,9 +58,10 @@ class ImageCacheService {
         return dir;
       } catch (e, st) {
         _cacheDirCompleter!.completeError(e, st);
-        _cacheDirCompleter = null;
         rethrow;
       }
+    } finally {
+      _cacheDirCompleter = null;
     }
   }
 
@@ -98,21 +111,27 @@ class ImageCacheService {
     final cleanUrl = url.trim();
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) return null;
 
-    if (_inFlight.containsKey(cleanUrl)) {
-      return _inFlight[cleanUrl]!;
+    final existingFuture = _inFlight[cleanUrl];
+    if (existingFuture != null) {
+      return existingFuture;
     }
 
-    final existing = await getCachedFile(cleanUrl);
-    if (existing != null) return existing;
+    final completer = Completer<File?>();
+    _inFlight[cleanUrl] = completer.future;
 
-    if (_inFlight.containsKey(cleanUrl)) {
-      return _inFlight[cleanUrl]!;
-    }
-
-    final future = _performDownloadAndCache(cleanUrl);
-    _inFlight[cleanUrl] = future;
     try {
-      return await future;
+      final existing = await getCachedFile(cleanUrl);
+      if (existing != null) {
+        completer.complete(existing);
+        return existing;
+      }
+
+      final downloaded = await _performDownloadAndCache(cleanUrl);
+      completer.complete(downloaded);
+      return downloaded;
+    } catch (e, st) {
+      completer.completeError(e, st);
+      rethrow;
     } finally {
       _inFlight.remove(cleanUrl);
     }

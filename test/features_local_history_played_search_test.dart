@@ -233,6 +233,32 @@ void main() {
       expect(history, isEmpty);
     });
 
+    test('clearPlaybackHistory completely empties history even when episodes have progress or isPlayed=1', () async {
+      final ep = Episode(
+        podcastId: podcastId,
+        guid: 'ep-played-perm',
+        title: 'Played Perm',
+        publishedAt: DateTime.utc(2026, 1, 1),
+        mediaUrl: 'https://example.com/perm.mp3',
+        description: 'Perm desc',
+        imageUrl: '',
+        podcastRss: 'https://example.com/feed.xml',
+        duration: 2000,
+        position: 1500,
+        isPlayed: true,
+      );
+      await db.insertEpisodes([ep]);
+      final saved = (await db.getEpisodeByGuid('ep-played-perm'))!;
+      await db.recordPlaybackHistory(saved.id!, position: 1500, duration: 2000, completed: true);
+
+      var history = await db.getPlaybackHistory();
+      expect(history.length, 1);
+
+      await db.clearPlaybackHistory();
+      history = await db.getPlaybackHistory();
+      expect(history, isEmpty);
+    });
+
     test('setEpisodePlayed and markMultipleEpisodesPlayed toggle played status and positions in DB', () async {
       final ep1 = Episode(
         podcastId: podcastId,
@@ -266,7 +292,7 @@ void main() {
       final id2 = (await db.getEpisodeByGuid('ep-played-2'))!.id!;
 
       // Mark ep1 as played
-      await db.setEpisodePlayed(id1, true, position: 1500);
+      await db.setEpisodePlayed(id1, true);
       final fetched1 = await db.getEpisodeById(id1);
       expect(fetched1!.isPlayed, isTrue);
       expect(fetched1.position, 1500);
@@ -282,7 +308,9 @@ void main() {
       final bulkFetched1 = await db.getEpisodeById(id1);
       final bulkFetched2 = await db.getEpisodeById(id2);
       expect(bulkFetched1!.isPlayed, isTrue);
+      expect(bulkFetched1.position, 1500);
       expect(bulkFetched2!.isPlayed, isTrue);
+      expect(bulkFetched2.position, 2000);
 
       // Bulk mark ep1 and ep2 as unplayed
       await db.markMultipleEpisodesPlayed([id1, id2], false);

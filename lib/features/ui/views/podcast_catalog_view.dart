@@ -32,7 +32,18 @@ class _PodcastCatalogViewState extends ConsumerState<PodcastCatalogView> {
     final podcastsState = ref.watch(podcastsNotifierProvider);
     final syncStatus = ref.watch(syncStatusNotifierProvider);
 
-    return Scaffold(
+    return PopScope(
+      canPop: !_isSearching,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _isSearching) {
+          setState(() {
+            _isSearching = false;
+            _searchQuery = '';
+            _searchController.clear();
+          });
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: _isSearching
             ? TextField(
@@ -338,6 +349,7 @@ class _PodcastCatalogViewState extends ConsumerState<PodcastCatalogView> {
           ),
         ],
       ),
+    ),
     );
   }
 
@@ -438,7 +450,7 @@ class _PodcastCatalogViewState extends ConsumerState<PodcastCatalogView> {
           },
         );
       },
-    );
+    ).then((_) => controller.dispose());
   }
 
   Future<void> _exportOpml(BuildContext context, WidgetRef ref) async {

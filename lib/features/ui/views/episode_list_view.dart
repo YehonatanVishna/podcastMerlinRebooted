@@ -165,7 +165,17 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
         .where((e) => e.id != null && _selectedEpisodeIds.contains(e.id) && e.isDownloaded)
         .length;
 
-    return Scaffold(
+    return PopScope(
+      canPop: !_isSelectionMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _isSelectionMode) {
+          setState(() {
+            _isSelectionMode = false;
+            _selectedEpisodeIds.clear();
+          });
+        }
+      },
+      child: Scaffold(
       appBar: _isSelectionMode
           ? AppBar(
               leading: IconButton(
@@ -388,6 +398,7 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
           ),
         ],
       ),
+    ),
     );
   }
 

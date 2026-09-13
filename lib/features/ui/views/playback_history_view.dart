@@ -252,7 +252,9 @@ class PlaybackHistoryView extends ConsumerWidget {
                                     } else if (val == 'toggle_played') {
                                       final newPlayed = !ep.isFinished;
                                       if (ep.id != null) {
-                                        await ref.read(databaseProvider).setEpisodePlayed(ep.id!, newPlayed);
+                                        await ref
+                                            .read(episodesNotifierProvider(ep.podcastId).notifier)
+                                            .markAsPlayed(ep, newPlayed);
                                         await ref.read(playbackHistoryProvider.notifier).loadHistory();
                                       }
                                     } else if (val == 'play_next') {

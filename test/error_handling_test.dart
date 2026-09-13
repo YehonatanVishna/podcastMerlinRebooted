@@ -164,7 +164,7 @@ void main() {
         db: db,
       );
 
-      final result = await syncService.performFullSync();
+      final result = await syncService.performFullSync(requireGpodder: true);
       expect(result, isFalse);
       expect(syncService.lastError, contains('Server credentials not configured'));
     });
@@ -178,7 +178,7 @@ void main() {
       );
       final notifier = SyncStatusNotifier(syncService);
 
-      final success = await notifier.performFullSync();
+      final success = await notifier.performFullSync(requireGpodder: true);
       expect(success, isFalse);
       expect(notifier.state.error, contains('Server credentials not configured'));
 

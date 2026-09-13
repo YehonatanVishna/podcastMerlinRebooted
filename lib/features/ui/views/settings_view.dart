@@ -222,7 +222,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            _serverController.text.trim().isEmpty ? Icons.phone_android : Icons.cloud_done,
+                            _serverController.text.trim().isEmpty ? Icons.phone_android : Icons.cloud_outlined,
                             size: 14,
                             color: _serverController.text.trim().isEmpty
                                 ? Theme.of(context).colorScheme.onPrimaryContainer
@@ -230,7 +230,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            _serverController.text.trim().isEmpty ? 'Local Mode' : 'Connected',
+                            _serverController.text.trim().isEmpty ? 'Local Mode' : 'gPodder Mode',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
