@@ -65,7 +65,12 @@ class PodcastPlayerWidgetProvider : HomeWidgetProvider() {
                 }
 
                 if (loadedBitmap != null) {
-                    val rounded = getRoundedCornerBitmap(loadedBitmap, 18f)
+                    // Match 10dp corner radius on 54dp container proportionally
+                    val cornerRadius = loadedBitmap.width * (10f / 54f)
+                    val rounded = getRoundedCornerBitmap(loadedBitmap, cornerRadius)
+                    if (rounded != loadedBitmap) {
+                        loadedBitmap.recycle()
+                    }
                     setImageViewBitmap(R.id.widget_artwork, rounded)
                 } else {
                     setImageViewResource(R.id.widget_artwork, R.drawable.ic_widget_placeholder)
@@ -96,16 +101,38 @@ class PodcastPlayerWidgetProvider : HomeWidgetProvider() {
                 inJustDecodeBounds = true
             }
             BitmapFactory.decodeFile(path, options)
+            if (options.outWidth <= 0 || options.outHeight <= 0) return null
+
             var sampleSize = 1
-            while (options.outWidth / (sampleSize * 2) >= maxDimension &&
-                options.outHeight / (sampleSize * 2) >= maxDimension
+            while (options.outWidth / sampleSize > maxDimension ||
+                options.outHeight / sampleSize > maxDimension
             ) {
                 sampleSize *= 2
             }
             val decodeOptions = BitmapFactory.Options().apply {
                 inSampleSize = sampleSize
             }
-            BitmapFactory.decodeFile(path, decodeOptions)
+            val decoded = BitmapFactory.decodeFile(path, decodeOptions) ?: return null
+
+            // Center-crop to square and scale down to maxDimension for uniform RemoteViews rendering
+            val minEdge = Math.min(decoded.width, decoded.height)
+            val xOffset = (decoded.width - minEdge) / 2
+            val yOffset = (decoded.height - minEdge) / 2
+            val cropped = Bitmap.createBitmap(decoded, xOffset, yOffset, minEdge, minEdge)
+            if (cropped != decoded) {
+                decoded.recycle()
+            }
+            val targetSize = Math.min(minEdge, maxDimension)
+            val scaled = if (cropped.width != targetSize) {
+                val s = Bitmap.createScaledBitmap(cropped, targetSize, targetSize, true)
+                if (s != cropped) {
+                    cropped.recycle()
+                }
+                s
+            } else {
+                cropped
+            }
+            scaled
         } catch (e: Exception) {
             null
         }

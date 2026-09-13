@@ -22,6 +22,7 @@ class PodcastWidgetService {
   MediaItem? _lastItem;
   DateTime _lastPositionUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   bool _isUpdating = false;
+  bool _hasPendingUpdate = false;
 
   /// Initializes listeners on the active [audioHandler] to keep the home screen
   /// widget in sync with current track information and playback controls.
@@ -32,44 +33,64 @@ class PodcastWidgetService {
     _mediaItemSub?.cancel();
 
     _playbackSub = audioHandler.playbackState.listen((state) {
-      final oldPlaying = _lastState?.playing;
-      final playingChanged = oldPlaying != state.playing;
+      final oldState = _lastState;
+      final playingChanged = oldState?.playing != state.playing;
 
       final now = DateTime.now();
-      // Throttle continuous position updates during playback to prevent excessive IPC/battery usage
-      final shouldUpdateProgress =
-          state.playing && now.difference(_lastPositionUpdate).inSeconds >= 20;
+      // Throttle continuous position updates during active playback to prevent excessive IPC
+      final timeSinceLastSync = now.difference(_lastPositionUpdate).inSeconds;
+      final isPlayingProgressTick = state.playing && timeSinceLastSync >= 20;
 
-      if (playingChanged || shouldUpdateProgress || _lastState == null) {
+      // Detect non-linear seek/jump (e.g. widget skip forward/backward or user scrub)
+      final positionDiff =
+          ((state.position.inSeconds) - (oldState?.position.inSeconds ?? 0)).abs();
+      final positionJumped = positionDiff > 2;
+
+      if (playingChanged || isPlayingProgressTick || positionJumped || _lastState == null) {
         _lastState = state;
-        if (shouldUpdateProgress) {
-          _lastPositionUpdate = now;
-        }
-        _syncWidget();
+        _lastPositionUpdate = now;
+        _triggerSync();
       }
     });
 
     _mediaItemSub = audioHandler.mediaItem.listen((item) {
-      if (item?.id != _lastItem?.id ||
-          item?.title != _lastItem?.title ||
-          item?.artUri != _lastItem?.artUri) {
+      if (item != _lastItem) {
         _lastItem = item;
-        _syncWidget();
+        _triggerSync();
       }
     });
 
     // Initial sync
     _lastState = audioHandler.playbackState.value;
     _lastItem = audioHandler.mediaItem.value;
+    _triggerSync();
+  }
+
+  /// Triggers a widget synchronization, re-queuing if an update is already in-flight.
+  void _triggerSync() {
+    if (_isUpdating) {
+      _hasPendingUpdate = true;
+      return;
+    }
     _syncWidget();
   }
 
   /// Syncs current metadata and playback state to HomeWidget preferences
   /// and prompts the native AppWidgetProvider to refresh.
   Future<void> _syncWidget() async {
-    if (_isUpdating) return;
     _isUpdating = true;
 
+    try {
+      do {
+        _hasPendingUpdate = false;
+        await _performSync();
+      } while (_hasPendingUpdate);
+    } finally {
+      _isUpdating = false;
+    }
+  }
+
+  Future<void> _performSync() async {
     try {
       final state = _lastState;
       final item = _lastItem;
@@ -95,7 +116,7 @@ class PodcastWidgetService {
           if (artworkPath == null && url.startsWith('http')) {
             // Trigger background download and cache so subsequent widget update displays it
             unawaited(ImageCacheService.downloadAndCache(url).then((file) {
-              if (file != null) {
+              if (file != null && _lastItem?.artUri?.toString() == url) {
                 HomeWidget.saveWidgetData<String>('widget_artwork_path', file.path);
                 HomeWidget.updateWidget(
                   name: _androidWidgetName,
@@ -123,8 +144,6 @@ class PodcastWidgetService {
       if (kDebugMode) {
         print('PodcastWidgetService sync error: $e');
       }
-    } finally {
-      _isUpdating = false;
     }
   }
 
@@ -134,5 +153,9 @@ class PodcastWidgetService {
     _mediaItemSub?.cancel();
     _playbackSub = null;
     _mediaItemSub = null;
+    _lastState = null;
+    _lastItem = null;
+    _isUpdating = false;
+    _hasPendingUpdate = false;
   }
 }
