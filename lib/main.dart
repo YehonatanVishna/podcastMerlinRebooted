@@ -46,6 +46,14 @@ void main() async {
     ),
   );
 
+  // Wait for initial queue & active playback restoration to complete before launching UI
+  await audioHandler.initFuture.timeout(
+    const Duration(seconds: 4),
+    onTimeout: () {
+      debugPrint('audioHandler.initFuture timed out, proceeding with app startup');
+    },
+  );
+
   runApp(
     ProviderScope(
       overrides: [

@@ -33,16 +33,19 @@ class SyncStatusState {
     bool? isSyncing,
     SyncStage? stage,
     String? currentTask,
+    bool clearCurrentTask = false,
     String? activeFeedUrl,
+    bool clearActiveFeedUrl = false,
     String? error,
+    bool clearError = false,
     List<String>? feedWarnings,
   }) {
     return SyncStatusState(
       isSyncing: isSyncing ?? this.isSyncing,
       stage: stage ?? this.stage,
-      currentTask: currentTask,
-      activeFeedUrl: activeFeedUrl,
-      error: error,
+      currentTask: clearCurrentTask ? null : (currentTask ?? this.currentTask),
+      activeFeedUrl: clearActiveFeedUrl ? null : (activeFeedUrl ?? this.activeFeedUrl),
+      error: clearError ? null : (error ?? this.error),
       feedWarnings: feedWarnings ?? this.feedWarnings,
     );
   }

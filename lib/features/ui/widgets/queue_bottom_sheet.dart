@@ -193,12 +193,15 @@ class QueueBottomSheet extends ConsumerWidget {
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
                           itemCount: queue.length,
-                          onReorderItem: (oldIndex, newIndex) {
+                          onReorder: (oldIndex, newIndex) {
+                            if (oldIndex < newIndex) {
+                              newIndex -= 1;
+                            }
                             audioHandler.reorderQueue(oldIndex, newIndex);
                           },
                           itemBuilder: (context, index) {
                             final ep = queue[index];
-                            final key = ValueKey('queue_item_${ep.id ?? ep.mediaUrl}_$index');
+                            final key = ValueKey('queue_item_${ep.id ?? ep.mediaUrl}');
 
                             return Dismissible(
                               key: key,

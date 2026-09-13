@@ -149,11 +149,15 @@ class _AppCachedImageState extends State<AppCachedImage> {
             ? Uri.parse(cleanUrl).toFilePath()
             : cleanUrl;
         final file = _localFile ?? File(filePath);
+        final int? cacheW = widget.width != null ? (widget.width! * 2).round() : null;
+        final int? cacheH = widget.height != null ? (widget.height! * 2).round() : null;
         if (file.existsSync()) {
           Widget content = Image.file(
             file,
             width: widget.width,
             height: widget.height,
+            cacheWidth: cacheW,
+            cacheHeight: cacheH,
             fit: widget.fit,
             errorBuilder: (context, error, stackTrace) => fallback,
           );
@@ -205,10 +209,14 @@ class _AppCachedImageState extends State<AppCachedImage> {
         errorBuilder: (context, error, stackTrace) => fallback,
       );
     } else if (_localFile != null) {
+      final int? cacheW = widget.width != null ? (widget.width! * 2).round() : null;
+      final int? cacheH = widget.height != null ? (widget.height! * 2).round() : null;
       content = Image.file(
         _localFile!,
         width: widget.width,
         height: widget.height,
+        cacheWidth: cacheW,
+        cacheHeight: cacheH,
         fit: widget.fit,
         errorBuilder: (context, error, stackTrace) => fallback,
       );

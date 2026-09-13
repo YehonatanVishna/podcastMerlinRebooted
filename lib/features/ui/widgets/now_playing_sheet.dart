@@ -1,15 +1,17 @@
+import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/models/episode.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../downloads/episode_download_service.dart';
 import 'cached_image.dart';
 import 'playback_speed_sheet.dart';
 import 'queue_bottom_sheet.dart';
 import 'sleep_timer_bottom_sheet.dart';
 
-class NowPlayingSheet extends ConsumerWidget {
+class NowPlayingSheet extends ConsumerStatefulWidget {
   const NowPlayingSheet({super.key});
 
   static Future<void> show(BuildContext context) {
@@ -24,6 +26,13 @@ class NowPlayingSheet extends ConsumerWidget {
       builder: (_) => const NowPlayingSheet(),
     );
   }
+
+  @override
+  ConsumerState<NowPlayingSheet> createState() => _NowPlayingSheetState();
+}
+
+class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
+  double? _dragSeconds;
 
   String _formatDuration(Duration d) {
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -73,7 +82,7 @@ class NowPlayingSheet extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final audioHandler = ref.watch(audioHandlerProvider);
 
@@ -204,41 +213,61 @@ class NowPlayingSheet extends ConsumerWidget {
                           ],
                           const SizedBox(height: 16),
                           // Scrubber Slider
-                          SliderTheme(
-                            data: SliderTheme.of(context).copyWith(
-                              trackHeight: 4,
-                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-                            ),
-                            child: Slider(
-                              min: 0.0,
-                              max: maxSeconds.toDouble(),
-                              value: clampedSec,
-                              onChanged: (val) {
-                                audioHandler.seek(Duration(seconds: val.toInt()));
-                              },
-                            ),
-                          ),
-                          // Timestamps Row
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  _formatDuration(position),
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
+                          Builder(
+                            builder: (context) {
+                              final displaySec = (_dragSeconds ?? clampedSec).clamp(0.0, maxSeconds.toDouble());
+                              final displayPos = _dragSeconds != null
+                                  ? Duration(seconds: _dragSeconds!.round())
+                                  : position;
+                              return Column(
+                                children: [
+                                  SliderTheme(
+                                    data: SliderTheme.of(context).copyWith(
+                                      trackHeight: 4,
+                                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                                    ),
+                                    child: Slider(
+                                      min: 0.0,
+                                      max: maxSeconds.toDouble(),
+                                      value: displaySec,
+                                      onChanged: (val) {
+                                        setState(() {
+                                          _dragSeconds = val;
+                                        });
+                                      },
+                                      onChangeEnd: (val) {
+                                        audioHandler.seek(Duration(seconds: val.toInt()));
+                                        setState(() {
+                                          _dragSeconds = null;
+                                        });
+                                      },
+                                    ),
                                   ),
-                                ),
-                                Text(
-                                  _formatDuration(totalDuration),
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
+                                  // Timestamps Row
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          _formatDuration(displayPos),
+                                          style: theme.textTheme.bodySmall?.copyWith(
+                                            color: theme.colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                        Text(
+                                          _formatDuration(totalDuration),
+                                          style: theme.textTheme.bodySmall?.copyWith(
+                                            color: theme.colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
+                                ],
+                              );
+                            },
                           ),
                           const SizedBox(height: 12),
                           // Primary Playback Controls
@@ -356,42 +385,7 @@ class NowPlayingSheet extends ConsumerWidget {
                               ),
                               // Download Action button
                               if (episode != null)
-                                Consumer(
-                                  builder: (context, ref, _) {
-                                    final downloadService = ref.watch(episodeDownloadServiceProvider);
-                                    if (episode.isDownloaded) {
-                                      return IconButton(
-                                        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                                        icon: Icon(
-                                          Icons.download_done_rounded,
-                                          color: theme.colorScheme.primary,
-                                        ),
-                                        tooltip: 'Downloaded',
-                                        onPressed: () {},
-                                      );
-                                    } else if (episode.isDownloading) {
-                                      return const IconButton(
-                                        constraints: BoxConstraints(minWidth: 48, minHeight: 48),
-                                        icon: SizedBox(
-                                          width: 20,
-                                          height: 20,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
-                                        ),
-                                        tooltip: 'Downloading...',
-                                        onPressed: null,
-                                      );
-                                    } else {
-                                      return IconButton(
-                                        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                                        icon: const Icon(Icons.download_outlined),
-                                        tooltip: 'Download Episode',
-                                        onPressed: () {
-                                          downloadService.startDownload(episode);
-                                        },
-                                      );
-                                    }
-                                  },
-                                ),
+                                _NowPlayingDownloadButton(episode: episode),
                             ],
                           ),
                           const SizedBox(height: 12),
@@ -406,5 +400,285 @@ class NowPlayingSheet extends ConsumerWidget {
         );
       },
     );
+  }
+}
+
+class _NowPlayingDownloadButton extends ConsumerStatefulWidget {
+  final Episode episode;
+
+  const _NowPlayingDownloadButton({required this.episode});
+
+  @override
+  ConsumerState<_NowPlayingDownloadButton> createState() => _NowPlayingDownloadButtonState();
+}
+
+class _NowPlayingDownloadButtonState extends ConsumerState<_NowPlayingDownloadButton> {
+  StreamSubscription<DownloadTaskEvent>? _downloadSub;
+  late DownloadStatus _status;
+  late double _progress;
+  String? _downloadPath;
+  String? _error;
+  int? _resolvedEpisodeId;
+
+  @override
+  void initState() {
+    super.initState();
+    _initDownloadState();
+  }
+
+  @override
+  void didUpdateWidget(covariant _NowPlayingDownloadButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.episode.mediaUrl != widget.episode.mediaUrl ||
+        oldWidget.episode.id != widget.episode.id) {
+      _initDownloadState();
+    }
+  }
+
+  @override
+  void dispose() {
+    _downloadSub?.cancel();
+    super.dispose();
+  }
+
+  void _initDownloadState() {
+    _resolvedEpisodeId = widget.episode.id;
+    _status = widget.episode.downloadStatus;
+    _progress = widget.episode.downloadProgress;
+    _downloadPath = widget.episode.downloadPath;
+    _error = widget.episode.downloadError;
+
+    final downloadService = ref.read(episodeDownloadServiceProvider);
+
+    if (_resolvedEpisodeId != null) {
+      final task = downloadService.currentTasks[_resolvedEpisodeId];
+      if (task != null) {
+        _status = task.status;
+        _progress = task.progress;
+        _downloadPath = task.downloadPath ?? _downloadPath;
+        _error = task.error;
+      } else if (downloadService.isEpisodeActive(_resolvedEpisodeId!)) {
+        _status = DownloadStatus.downloading;
+      } else if (downloadService.isEpisodeQueued(_resolvedEpisodeId!)) {
+        _status = DownloadStatus.queued;
+      } else if (downloadService.isEpisodePaused(_resolvedEpisodeId!)) {
+        _status = DownloadStatus.paused;
+      }
+    }
+
+    _subscribeToEvents();
+    _queryDatabaseState();
+  }
+
+  void _subscribeToEvents() {
+    _downloadSub?.cancel();
+    final downloadService = ref.read(episodeDownloadServiceProvider);
+    _downloadSub = downloadService.onDownloadEvent.listen((event) {
+      final matches = (event.episodeId == _resolvedEpisodeId) ||
+          (event.mediaUrl.isNotEmpty && event.mediaUrl == widget.episode.mediaUrl);
+      if (matches && mounted) {
+        setState(() {
+          _resolvedEpisodeId ??= event.episodeId;
+          _status = event.status;
+          _progress = event.progress;
+          _downloadPath = event.downloadPath ?? _downloadPath;
+          _error = event.error;
+        });
+      }
+    });
+  }
+
+  Future<void> _queryDatabaseState() async {
+    try {
+      final db = ref.read(databaseProvider);
+      Episode? dbEp;
+      if (widget.episode.id != null) {
+        dbEp = await db.getEpisodeById(widget.episode.id!);
+      }
+      if (dbEp == null && widget.episode.guid.isNotEmpty) {
+        dbEp = await db.getEpisodeByGuid(widget.episode.guid);
+      }
+      if (dbEp == null && widget.episode.mediaUrl.isNotEmpty) {
+        dbEp = await db.getEpisodeByMediaUrl(widget.episode.mediaUrl);
+      }
+
+      if (dbEp != null && mounted) {
+        final downloadService = ref.read(episodeDownloadServiceProvider);
+        final task = dbEp.id != null ? downloadService.currentTasks[dbEp.id] : null;
+        setState(() {
+          _resolvedEpisodeId = dbEp!.id;
+          if (task != null) {
+            _status = task.status;
+            _progress = task.progress;
+            _downloadPath = task.downloadPath ?? dbEp.downloadPath;
+            _error = task.error;
+          } else {
+            _status = dbEp.downloadStatus;
+            _progress = dbEp.downloadProgress;
+            _downloadPath = dbEp.downloadPath;
+            _error = dbEp.downloadError;
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  Episode _getEffectiveEpisode() {
+    return widget.episode.copyWith(
+      id: _resolvedEpisodeId ?? widget.episode.id,
+      downloadStatus: _status,
+      downloadProgress: _progress,
+      downloadPath: _downloadPath,
+      downloadError: _error,
+    );
+  }
+
+  void _showDeleteDialog(BuildContext context) {
+    final theme = Theme.of(context);
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Delete Download'),
+        content: Text(
+          'Remove downloaded episode for "${widget.episode.title}" from device storage?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: theme.colorScheme.error),
+            onPressed: () async {
+              Navigator.pop(dialogCtx);
+              final messenger = ScaffoldMessenger.of(context);
+              final ep = _getEffectiveEpisode();
+              await ref.read(episodeDownloadServiceProvider).deleteDownload(ep);
+              if (mounted) {
+                setState(() {
+                  _status = DownloadStatus.none;
+                  _progress = 0.0;
+                  _downloadPath = null;
+                });
+                messenger.showSnackBar(
+                  SnackBar(content: Text('Removed download for "${widget.episode.title}"')),
+                );
+              }
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final downloadService = ref.watch(episodeDownloadServiceProvider);
+
+    final isDownloaded = _status == DownloadStatus.downloaded &&
+        _downloadPath != null &&
+        _downloadPath!.isNotEmpty;
+    final isDownloading = _status == DownloadStatus.downloading || _status == DownloadStatus.queued;
+    final isPaused = _status == DownloadStatus.paused;
+    final isFailed = _status == DownloadStatus.failed;
+
+    if (isDownloaded) {
+      return IconButton(
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        icon: Icon(
+          Icons.download_done_rounded,
+          color: theme.colorScheme.primary,
+        ),
+        tooltip: 'Downloaded • Tap to manage',
+        onPressed: () => _showDeleteDialog(context),
+      );
+    } else if (isDownloading) {
+      final isQueued = _status == DownloadStatus.queued;
+      final pct = (_progress * 100).toInt();
+      return IconButton(
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        icon: SizedBox(
+          width: 24,
+          height: 24,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              CircularProgressIndicator(
+                value: (_progress > 0 && !isQueued) ? _progress : null,
+                strokeWidth: 2.5,
+              ),
+              Icon(
+                isQueued ? Icons.hourglass_top : Icons.close,
+                size: 12,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+        tooltip: isQueued
+            ? 'Queued for download • Tap to cancel'
+            : 'Downloading ($pct%) • Tap to cancel',
+        onPressed: () {
+          final epId = _resolvedEpisodeId ?? widget.episode.id;
+          if (epId != null) {
+            downloadService.cancelDownload(epId);
+          }
+          setState(() {
+            _status = DownloadStatus.none;
+            _progress = 0.0;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Download cancelled')),
+          );
+        },
+      );
+    } else if (isPaused) {
+      return IconButton(
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        icon: const Icon(Icons.play_circle_outline, color: Colors.blue),
+        tooltip: 'Download paused • Tap to resume',
+        onPressed: () {
+          final ep = _getEffectiveEpisode();
+          downloadService.resumeDownload(ep);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Resuming download...')),
+          );
+        },
+      );
+    } else if (isFailed) {
+      return IconButton(
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        icon: const Icon(Icons.refresh, color: Colors.orange),
+        tooltip: 'Download failed (${_error ?? "Tap to retry"})',
+        onPressed: () {
+          setState(() {
+            _status = DownloadStatus.queued;
+          });
+          final ep = _getEffectiveEpisode();
+          downloadService.startDownload(ep);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Retrying download for "${widget.episode.title}"')),
+          );
+        },
+      );
+    } else {
+      return IconButton(
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        icon: const Icon(Icons.download_outlined),
+        tooltip: 'Download Episode',
+        onPressed: () {
+          setState(() {
+            _status = DownloadStatus.queued;
+          });
+          final ep = _getEffectiveEpisode();
+          downloadService.startDownload(ep);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Starting download for "${widget.episode.title}"')),
+          );
+        },
+      );
+    }
   }
 }

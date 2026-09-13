@@ -89,6 +89,7 @@ class Episode {
     int? totalBytes,
     String? downloadError,
     bool clearDownloadError = false,
+    bool clearDownloadPath = false,
   }) {
     return Episode(
       id: id ?? this.id,
@@ -104,7 +105,7 @@ class Episode {
       isStarred: isStarred ?? this.isStarred,
       imageUrl: imageUrl ?? this.imageUrl,
       podcastRss: podcastRss ?? this.podcastRss,
-      downloadPath: downloadPath ?? this.downloadPath,
+      downloadPath: clearDownloadPath ? null : (downloadPath ?? this.downloadPath),
       downloadStatus: downloadStatus ?? this.downloadStatus,
       downloadProgress: downloadProgress ?? this.downloadProgress,
       downloadedBytes: downloadedBytes ?? this.downloadedBytes,
@@ -186,7 +187,7 @@ class Episode {
   }
 
   factory Episode.fromMap(Map<String, dynamic> map) {
-    final pubDateVal = map['pubDate'] ?? map['published_at'];
+    final pubDateVal = map['pubDate'] ?? map['published_at'] ?? map['pub_date'];
     final isPlayedVal = map['isPlayed'] ?? map['is_played'];
     final isStarredVal = map['isStarred'] ?? map['is_starred'];
     return Episode(
@@ -202,7 +203,7 @@ class Episode {
       isPlayed: _parseBool(isPlayedVal),
       isStarred: _parseBool(isStarredVal),
       imageUrl: (map['imageUrl'] ?? map['image_url'] ?? '').toString(),
-      podcastRss: (map['podcastRss'] ?? map['podcast_rss'] ?? '').toString(),
+      podcastRss: (map['podcastRss'] ?? map['podcast_rss'] ?? map['rssUrl'] ?? map['rss_url'] ?? '').toString(),
       downloadPath: (map['downloadPath'] ?? map['download_path']) as String?,
       downloadStatus: _parseDownloadStatus(map['downloadStatus'] ?? map['download_status']),
       downloadProgress: _parseDouble(map['downloadProgress'] ?? map['download_progress']),

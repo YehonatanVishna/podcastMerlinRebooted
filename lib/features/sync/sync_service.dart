@@ -17,6 +17,7 @@ class SyncService {
 
   String? lastError;
   List<String> lastFeedWarnings = [];
+  bool _isPushingActions = false;
 
   SyncService({
     GPodderApiClient? apiClient,
@@ -169,9 +170,9 @@ class SyncService {
         );
       }
 
-      // 2c. Refresh existing local podcasts not included in add/remove delta in parallel
+      // 2c. Refresh existing local podcasts not included in feedsToAdd or removeList in parallel
       final feedsToRefresh = localPodcasts
-          .where((pod) => !removeList.contains(pod.rssUrl) && !addList.contains(pod.rssUrl))
+          .where((pod) => !removeList.contains(pod.rssUrl) && !feedsToAdd.contains(pod.rssUrl))
           .toList();
 
       if (feedsToRefresh.isNotEmpty) {
@@ -384,24 +385,30 @@ class SyncService {
 
   /// Pushes enqueued offline actions to server after collapsing duplicates
   Future<bool> _pushPendingActions(String serverUrl, String username, String password) async {
-    final pending = await _db.getPendingActions();
-    if (pending.isEmpty) return true;
+    if (_isPushingActions) return true;
+    _isPushingActions = true;
+    try {
+      final pending = await _db.getPendingActions();
+      if (pending.isEmpty) return true;
 
-    final collapsed = _db.collapseActions(pending);
-    final success = await _apiClient.uploadEpisodeActions(
-      serverUrl: serverUrl,
-      username: username,
-      password: password,
-      actions: collapsed,
-    );
+      final collapsed = _db.collapseActions(pending);
+      final success = await _apiClient.uploadEpisodeActions(
+        serverUrl: serverUrl,
+        username: username,
+        password: password,
+        actions: collapsed,
+      );
 
-    if (success) {
-      final ids = pending.map((a) => a.id!).where((id) => id > 0).toList();
-      await _db.markActionsSynced(ids);
-    } else {
-      lastError = _apiClient.lastError ?? 'Failed to upload episode actions.';
+      if (success) {
+        final ids = pending.map((a) => a.id!).where((id) => id > 0).toList();
+        await _db.markActionsSynced(ids);
+      } else {
+        lastError = _apiClient.lastError ?? 'Failed to upload episode actions.';
+      }
+      return success;
+    } finally {
+      _isPushingActions = false;
     }
-    return success;
   }
 
   /// Download and parse RSS feed for a podcast URL, then store to database

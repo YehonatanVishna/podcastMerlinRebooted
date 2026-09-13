@@ -87,6 +87,10 @@ class ImageCacheService {
     final cleanUrl = url.trim();
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) return null;
 
+    if (_inFlight.containsKey(cleanUrl)) {
+      return _inFlight[cleanUrl]!;
+    }
+
     final existing = await getCachedFile(cleanUrl);
     if (existing != null) return existing;
 
@@ -112,13 +116,20 @@ class ImageCacheService {
       final dir = await _getCacheDir();
       final filename = _hashUrl(cleanUrl);
       final file = File(p.join(dir.path, filename));
-      if (await file.exists()) return file;
+      if (await file.exists() && await file.length() > 0) return file;
 
       final tempFilename = '$filename.${DateTime.now().microsecondsSinceEpoch}.tmp';
       tempFile = File(p.join(dir.path, tempFilename));
 
       await _dio.download(cleanUrl, tempFile.path);
       if (await tempFile.exists()) {
+        final length = await tempFile.length();
+        if (length == 0) {
+          try {
+            await tempFile.delete();
+          } catch (_) {}
+          return null;
+        }
         if (await file.exists()) {
           try {
             await tempFile.delete();

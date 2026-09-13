@@ -84,13 +84,17 @@ class RssFeedParser {
   }
 
   RssFeedResult parseFeedXml(String xmlString, String rssUrl) {
-    if (xmlString.trim().isEmpty) {
+    var cleanXml = xmlString;
+    if (cleanXml.startsWith('\uFEFF')) {
+      cleanXml = cleanXml.substring(1);
+    }
+    if (cleanXml.trim().isEmpty) {
       throw RssParseException('RSS feed XML content is empty.');
     }
 
     XmlDocument document;
     try {
-      document = XmlDocument.parse(xmlString);
+      document = XmlDocument.parse(cleanXml);
     } catch (e) {
       throw RssParseException('Malformed XML: ${AppErrorFormatter.format(e)}');
     }
@@ -172,7 +176,8 @@ class RssFeedParser {
   String? _getElementText(XmlElement element, String tagName) {
     for (final child in element.children) {
       if (child is XmlElement && (child.name.qualified == tagName || child.name.local == tagName)) {
-        return child.innerText.trim();
+        final text = child.innerText.trim();
+        if (text.isNotEmpty) return text;
       }
     }
     return null;
@@ -190,12 +195,23 @@ class RssFeedParser {
 
   String? _getEnclosureUrl(XmlElement element) {
     for (final child in element.children) {
-      if (child is XmlElement && (child.name.qualified == 'enclosure' || child.name.local == 'link')) {
-        final url = child.getAttribute('url') ?? child.getAttribute('href');
-        final rel = child.getAttribute('rel');
-        if (url != null && url.isNotEmpty) {
-          if (rel == null || rel == 'enclosure' || url.endsWith('.mp3') || url.endsWith('.m4a')) {
+      if (child is XmlElement) {
+        final qName = child.name.qualified;
+        final lName = child.name.local;
+        if (qName == 'enclosure' || lName == 'enclosure' || qName == 'media:content' || lName == 'content') {
+          final url = child.getAttribute('url') ?? child.getAttribute('href');
+          if (url != null && url.isNotEmpty) {
             return url;
+          }
+        }
+        if (lName == 'link') {
+          final rel = child.getAttribute('rel');
+          final type = child.getAttribute('type');
+          final url = child.getAttribute('href') ?? child.getAttribute('url');
+          if (url != null && url.isNotEmpty) {
+            if (rel == 'enclosure' || (type != null && type.startsWith('audio/')) || url.endsWith('.mp3') || url.endsWith('.m4a')) {
+              return url;
+            }
           }
         }
       }

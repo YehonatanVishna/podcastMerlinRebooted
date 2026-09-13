@@ -211,6 +211,7 @@ class _PodcastDiscoveryViewState extends ConsumerState<PodcastDiscoveryView> {
                         ? IconButton(
                             icon: const Icon(Icons.clear),
                             onPressed: () {
+                              _debounceTimer?.cancel();
                               _searchController.clear();
                               ref.read(discoveryNotifierProvider.notifier).loadTrending();
                             },

@@ -171,6 +171,71 @@ class DatabaseHelper {
         ''');
       } catch (_) {}
 
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS active_playback (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            episodeId INTEGER,
+            guid TEXT,
+            mediaUrl TEXT NOT NULL,
+            title TEXT,
+            podcastTitle TEXT,
+            imageUrl TEXT,
+            duration INTEGER DEFAULT 0,
+            position INTEGER NOT NULL DEFAULT 0,
+            isCompleted INTEGER NOT NULL DEFAULT 0,
+            updatedAt TEXT NOT NULL
+          )
+        ''');
+        final fkInfo = await db.rawQuery('PRAGMA foreign_key_list(active_playback)');
+        if (fkInfo.isNotEmpty) {
+          await db.execute('DROP TABLE active_playback;');
+          await db.execute('''
+            CREATE TABLE active_playback (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              episodeId INTEGER,
+              guid TEXT,
+              mediaUrl TEXT NOT NULL,
+              title TEXT,
+              podcastTitle TEXT,
+              imageUrl TEXT,
+              duration INTEGER DEFAULT 0,
+              position INTEGER NOT NULL DEFAULT 0,
+              isCompleted INTEGER NOT NULL DEFAULT 0,
+              updatedAt TEXT NOT NULL
+            )
+          ''');
+        }
+        final activeInfo = await db.rawQuery('PRAGMA table_info(active_playback)');
+        final activeCols = activeInfo.map((row) => row['name'].toString()).toSet();
+        if (!activeCols.contains('guid')) {
+          await db.execute('ALTER TABLE active_playback ADD COLUMN guid TEXT;');
+        }
+        if (!activeCols.contains('title')) {
+          await db.execute('ALTER TABLE active_playback ADD COLUMN title TEXT;');
+        }
+        if (!activeCols.contains('podcastTitle')) {
+          await db.execute('ALTER TABLE active_playback ADD COLUMN podcastTitle TEXT;');
+        }
+        if (!activeCols.contains('imageUrl')) {
+          await db.execute('ALTER TABLE active_playback ADD COLUMN imageUrl TEXT;');
+        }
+        if (!activeCols.contains('duration')) {
+          await db.execute('ALTER TABLE active_playback ADD COLUMN duration INTEGER DEFAULT 0;');
+        }
+        if (!activeCols.contains('podcastRss')) {
+          try {
+            await db.execute('ALTER TABLE active_playback ADD COLUMN podcastRss TEXT;');
+          } catch (_) {}
+        }
+        try {
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_media_url ON episodes(mediaUrl);');
+        } catch (_) {}
+        try {
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_guid ON episodes(guid);');
+        } catch (_) {}
+      } catch (_) {}
+
       _columnsDetected = true;
       _detectCompleter!.complete();
     } catch (e, stack) {
@@ -189,6 +254,9 @@ class DatabaseHelper {
             version: 1,
             onConfigure: (db) async {
               await db.execute('PRAGMA foreign_keys = ON;');
+              try {
+                await db.execute('PRAGMA busy_timeout = 5000;');
+              } catch (_) {}
             },
             onCreate: _createDB,
           )
@@ -197,6 +265,12 @@ class DatabaseHelper {
             version: 1,
             onConfigure: (db) async {
               await db.execute('PRAGMA foreign_keys = ON;');
+              try {
+                await db.execute('PRAGMA journal_mode = WAL;');
+              } catch (_) {}
+              try {
+                await db.execute('PRAGMA busy_timeout = 5000;');
+              } catch (_) {}
             },
             onCreate: _createDB,
           );
@@ -283,6 +357,25 @@ class DatabaseHelper {
         FOREIGN KEY (episodeId) REFERENCES episodes (id) ON DELETE CASCADE
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS active_playback (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        episodeId INTEGER,
+        guid TEXT,
+        mediaUrl TEXT NOT NULL,
+        title TEXT,
+        podcastTitle TEXT,
+        imageUrl TEXT,
+        duration INTEGER DEFAULT 0,
+        position INTEGER NOT NULL DEFAULT 0,
+        isCompleted INTEGER NOT NULL DEFAULT 0,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_media_url ON episodes (mediaUrl);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_guid ON episodes (guid);');
   }
 
   // PODCAST CRUD OPERATIONS
@@ -293,6 +386,10 @@ class DatabaseHelper {
     final existing = await getPodcastByUrl(podcast.rssUrl);
     if (existing != null) {
       final map = podcast.toMap();
+      if (_podcastRssUrlCol != 'rssUrl') {
+        map.remove('rssUrl');
+        map[_podcastRssUrlCol] = podcast.rssUrl;
+      }
       final id = podcast.id ?? existing.id;
       if (id != null) {
         map['id'] = id;
@@ -305,11 +402,21 @@ class DatabaseHelper {
       );
       return id ?? existing.id ?? 0;
     } else {
-      return db.insert(
+      final insertMap = podcast.toMap();
+      if (_podcastRssUrlCol != 'rssUrl') {
+        insertMap.remove('rssUrl');
+        insertMap[_podcastRssUrlCol] = podcast.rssUrl;
+      }
+      final insertedId = await db.insert(
         'podcasts',
-        podcast.toMap(),
+        insertMap,
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
+      if (insertedId == 0) {
+        final found = await getPodcastByUrl(podcast.rssUrl);
+        return found?.id ?? 0;
+      }
+      return insertedId;
     }
   }
 
@@ -456,7 +563,7 @@ class DatabaseHelper {
           'title': episode.title,
           'description': episode.description,
           _mediaUrlCol: episode.mediaUrl,
-          _pubDateCol: episode.publishedAt?.toIso8601String(),
+          _pubDateCol: episode.publishedAt?.toIso8601String() ?? existing.publishedAt?.toIso8601String(),
           'duration': episode.duration > 0 ? episode.duration : existing.duration,
           'position': finalPosition,
           _isPlayedCol: finalIsPlayed ? 1 : 0,
@@ -553,7 +660,7 @@ class DatabaseHelper {
       LEFT JOIN podcasts p ON e.$_podcastIdCol = p.id
       WHERE $whereClause
       ORDER BY e.$_pubDateCol DESC
-      ${limit != null ? 'LIMIT $limit' : ''}
+      ${limit != null ? 'LIMIT $limit' : (offset != null ? 'LIMIT -1' : '')}
       ${offset != null ? 'OFFSET $offset' : ''}
     ''';
 
@@ -589,7 +696,7 @@ class DatabaseHelper {
       LEFT JOIN podcasts p ON e.$_podcastIdCol = p.id
       WHERE $whereClause
       ORDER BY e.$_pubDateCol DESC
-      ${limit != null ? 'LIMIT $limit' : ''}
+      ${limit != null ? 'LIMIT $limit' : (offset != null ? 'LIMIT -1' : '')}
       ${offset != null ? 'OFFSET $offset' : ''}
     ''';
 
@@ -799,7 +906,7 @@ class DatabaseHelper {
     final query = '''
       SELECT e.*, p.$_podcastRssUrlCol AS podcastRss
       FROM episodes e
-      JOIN podcasts p ON e.$_podcastIdCol = p.id
+      LEFT JOIN podcasts p ON e.$_podcastIdCol = p.id
       WHERE e.$_isStarredCol = 1
       ORDER BY e.$_pubDateCol DESC
       LIMIT $limit
@@ -1412,6 +1519,17 @@ class DatabaseHelper {
     return result;
   }
 
+  Future<int> clearQueuedGPodderActionsByIds(List<int> ids) async {
+    if (ids.isEmpty) return 0;
+    final db = await instance.database;
+    final placeholders = List.filled(ids.length, '?').join(',');
+    return db.delete(
+      'gpodder_actions',
+      where: 'id IN ($placeholders)',
+      whereArgs: ids,
+    );
+  }
+
   Future<int> clearQueuedGPodderActionsUpTo(int maxId) async {
     final db = await instance.database;
     return db.delete(
@@ -1422,16 +1540,14 @@ class DatabaseHelper {
   }
 
   Future<int> markActionsSynced(dynamic actionsOrIds) async {
+    List<int> ids = [];
     if (actionsOrIds is List<int>) {
-      if (actionsOrIds.isEmpty) return 0;
-      final maxId = actionsOrIds.fold(0, (prev, curr) => curr > prev ? curr : prev);
-      return clearQueuedGPodderActionsUpTo(maxId);
+      ids = actionsOrIds.where((id) => id > 0).toList();
     } else if (actionsOrIds is List<GPodderAction>) {
-      if (actionsOrIds.isEmpty) return 0;
-      final maxId = actionsOrIds.map((a) => a.id ?? 0).fold(0, (prev, curr) => curr > prev ? curr : prev);
-      return clearQueuedGPodderActionsUpTo(maxId);
+      ids = actionsOrIds.map((a) => a.id ?? 0).where((id) => id > 0).toList();
     }
-    return 0;
+    if (ids.isEmpty) return 0;
+    return clearQueuedGPodderActionsByIds(ids);
   }
 
   // SUBSCRIPTION OFFLINE BACKLOG & DEDUPLICATION
@@ -1547,8 +1663,18 @@ class DatabaseHelper {
       } else {
         var epToInsert = episode;
         if ((epToInsert.podcastId == null || epToInsert.podcastId! <= 0) && epToInsert.podcastRss.isNotEmpty) {
-          final pod = await getPodcastByRssUrl(epToInsert.podcastRss);
-          if (pod != null && pod.id != null) {
+          var pod = await getPodcastByRssUrl(epToInsert.podcastRss);
+          if (pod == null) {
+            final newPodId = await insertPodcast(Podcast(
+              rssUrl: epToInsert.podcastRss,
+              title: epToInsert.podcastRss,
+              description: '',
+              imageUrl: epToInsert.imageUrl,
+              link: '',
+              lastUpdated: DateTime.now(),
+            ));
+            epToInsert = epToInsert.copyWith(podcastId: newPodId);
+          } else if (pod.id != null) {
             epToInsert = epToInsert.copyWith(podcastId: pod.id);
           }
         }
@@ -1636,5 +1762,136 @@ class DatabaseHelper {
     final db = await instance.database;
     await _detectColumnNames(db);
     return db.delete('playback_queue');
+  }
+
+  // ACTIVE PLAYBACK PERSISTENCE
+
+  Future<void> saveActivePlayback(
+    Episode episode, {
+    int? position,
+    bool isCompleted = false,
+    String? podcastTitle,
+  }) async {
+    final db = await instance.database;
+    await _detectColumnNames(db);
+
+    int? episodeId = episode.id;
+    if (episodeId == null || episodeId <= 0) {
+      Episode? existing;
+      if (episode.guid.isNotEmpty) {
+        existing = await getEpisodeByGuid(episode.guid);
+      }
+      if (existing == null && episode.mediaUrl.isNotEmpty) {
+        existing = await getEpisodeByMediaUrl(episode.mediaUrl);
+      }
+      if (existing != null) {
+        episodeId = existing.id;
+      }
+    }
+
+    final pos = position ?? episode.position;
+    try {
+      await db.insert(
+        'active_playback',
+        {
+          'id': 1,
+          'episodeId': episodeId,
+          'guid': episode.guid,
+          'mediaUrl': episode.mediaUrl,
+          'title': episode.title,
+          'podcastTitle': podcastTitle ?? episode.podcastRss,
+          'podcastRss': episode.podcastRss,
+          'imageUrl': episode.imageUrl,
+          'duration': episode.duration,
+          'position': pos,
+          'isCompleted': isCompleted ? 1 : 0,
+          'updatedAt': DateTime.now().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } catch (e) {
+      if (e.toString().contains('787') || e.toString().toLowerCase().contains('foreign key')) {
+        await db.insert(
+          'active_playback',
+          {
+            'id': 1,
+            'episodeId': null,
+            'guid': episode.guid,
+            'mediaUrl': episode.mediaUrl,
+            'title': episode.title,
+            'podcastTitle': podcastTitle ?? episode.podcastRss,
+            'podcastRss': episode.podcastRss,
+            'imageUrl': episode.imageUrl,
+            'duration': episode.duration,
+            'position': pos,
+            'isCompleted': isCompleted ? 1 : 0,
+            'updatedAt': DateTime.now().toIso8601String(),
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      } else {
+        rethrow;
+      }
+    }
+  }
+
+  Future<Episode?> getActivePlayback({bool includeCompleted = false}) async {
+    final db = await instance.database;
+    await _detectColumnNames(db);
+
+    final whereClause = includeCompleted ? 'a.id = 1' : 'a.id = 1 AND a.isCompleted = 0';
+    final query = '''
+      SELECT 
+        a.position AS activePosition, 
+        a.isCompleted AS activeCompleted,
+        a.guid AS activeGuid,
+        a.title AS activeTitle,
+        a.podcastTitle AS activePodcastTitle,
+        a.podcastRss AS activePodcastRss,
+        a.imageUrl AS activeImageUrl,
+        a.duration AS activeDuration,
+        a.mediaUrl AS activeMediaUrl,
+        e.*, 
+        p.$_podcastRssUrlCol AS podcastRss
+      FROM active_playback a
+      LEFT JOIN episodes e ON (a.episodeId = e.id OR (a.episodeId IS NULL AND ((a.guid IS NOT NULL AND a.guid != '' AND a.guid = e.guid) OR a.mediaUrl = e.$_mediaUrlCol)))
+      LEFT JOIN podcasts p ON e.$_podcastIdCol = p.id
+      WHERE $whereClause
+      LIMIT 1
+    ''';
+
+    final rows = await db.rawQuery(query);
+    if (rows.isEmpty) return null;
+
+    final row = rows.first;
+    final activePos = (row['activePosition'] as num?)?.toInt() ?? 0;
+
+    if (row['id'] != null) {
+      final ep = Episode.fromMap(row);
+      return ep.copyWith(position: activePos);
+    }
+
+    final rawRss = row['activePodcastRss'] as String?;
+    final fallbackTitle = row['activePodcastTitle'] as String? ?? '';
+    final resolvedRss = (rawRss != null && rawRss.isNotEmpty)
+        ? rawRss
+        : (fallbackTitle.startsWith('http') ? fallbackTitle : '');
+
+    return Episode(
+      guid: row['activeGuid'] as String? ?? row['activeMediaUrl'] as String? ?? '',
+      title: row['activeTitle'] as String? ?? 'Podcast Merlin',
+      description: '',
+      mediaUrl: row['activeMediaUrl'] as String? ?? '',
+      duration: (row['activeDuration'] as num?)?.toInt() ?? 0,
+      position: activePos,
+      imageUrl: row['activeImageUrl'] as String? ?? '',
+      podcastRss: resolvedRss,
+    );
+  }
+
+  Future<int> clearActivePlayback() async {
+    final db = await instance.database;
+    await _detectColumnNames(db);
+    return db.delete('active_playback');
   }
 }

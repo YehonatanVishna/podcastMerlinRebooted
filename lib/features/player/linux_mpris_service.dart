@@ -170,7 +170,7 @@ class _MprisDBusObject extends DBusObject {
           _audioHandler.stop();
           return DBusMethodSuccessResponse();
         case 'Next':
-          _audioHandler.fastForward();
+          _audioHandler.skipToNext();
           return DBusMethodSuccessResponse();
         case 'Previous':
           _audioHandler.rewind();
@@ -180,7 +180,8 @@ class _MprisDBusObject extends DBusObject {
             final offsetMicros = (methodCall.values.first as DBusInt64).value;
             final seconds = (offsetMicros / 1000000).round();
             if (_audioHandler is SeekHandler) {
-              final newPos = _state.updatePosition + Duration(seconds: seconds);
+              final target = _state.updatePosition + Duration(seconds: seconds);
+              final newPos = target < Duration.zero ? Duration.zero : target;
               _audioHandler.seek(newPos);
             }
           }
@@ -188,7 +189,8 @@ class _MprisDBusObject extends DBusObject {
         case 'SetPosition':
           if (methodCall.values.length >= 2 && methodCall.values[1] is DBusInt64) {
             final posMicros = (methodCall.values[1] as DBusInt64).value;
-            _audioHandler.seek(Duration(microseconds: posMicros));
+            final pos = Duration(microseconds: posMicros);
+            _audioHandler.seek(pos < Duration.zero ? Duration.zero : pos);
           }
           return DBusMethodSuccessResponse();
       }

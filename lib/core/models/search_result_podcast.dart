@@ -40,7 +40,7 @@ class SearchResultPodcast {
       description: (json['description'] ?? '').toString(),
       websiteUrl: (json['link'] ?? '').toString(),
       categories: parsedCategories,
-      episodeCount: json['episodeCount'] as int?,
+      episodeCount: (json['episodeCount'] as num?)?.toInt(),
       language: json['language']?.toString(),
       providerId: 'podcast_index',
     );

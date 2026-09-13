@@ -11,6 +11,7 @@ import '../../features/sync/gpodder_api_client.dart';
 import '../../features/sync/secure_storage_service.dart';
 import '../../features/sync/sync_service.dart';
 import '../../features/discovery/multisource_search_service.dart';
+import '../../features/discovery/podcast_index_provider.dart';
 import '../../features/discovery/discovery_notifier.dart';
 import '../../features/downloads/episode_download_service.dart';
 
@@ -23,7 +24,27 @@ final episodeDownloadServiceProvider = Provider<EpisodeDownloadService>((ref) {
     db: ref.watch(databaseProvider),
   );
   service.reconcileOnStartup();
-  ref.onDispose(() => service.dispose());
+
+  final sub = service.onDownloadEvent.listen((event) {
+    try {
+      final handler = ref.read(audioHandlerProvider);
+      handler.updateEpisodeDownloadStatus(
+        episodeId: event.episodeId,
+        mediaUrl: event.mediaUrl,
+        status: event.status,
+        progress: event.progress,
+        downloadedBytes: event.downloadedBytes,
+        totalBytes: event.totalBytes,
+        downloadPath: event.downloadPath,
+        error: event.error,
+      );
+    } catch (_) {}
+  });
+
+  ref.onDispose(() {
+    sub.cancel();
+    service.dispose();
+  });
   return service;
 });
 
@@ -41,7 +62,7 @@ class SyncStatusNotifier extends StateNotifier<SyncStatusState> {
   SyncStatusNotifier(this._sync) : super(const SyncStatusState());
 
   void clearError() {
-    state = state.copyWith(error: null);
+    state = state.copyWith(clearError: true);
   }
 
   void clearWarnings() {
@@ -503,7 +524,6 @@ final failedEpisodesListProvider =
   final sub = service.onDownloadEvent.listen((event) {
     if (event.status == DownloadStatus.failed ||
         event.status == DownloadStatus.none ||
-        event.status == DownloadStatus.downloading ||
         event.status == DownloadStatus.queued) {
       ref.invalidateSelf();
     }
@@ -513,7 +533,11 @@ final failedEpisodesListProvider =
 });
 
 final multisourceSearchServiceProvider = Provider<MultisourceSearchService>((ref) {
-  return MultisourceSearchService();
+  final service = MultisourceSearchService();
+  service.registerProvider(PodcastIndexProvider(
+    storage: ref.watch(secureStorageProvider),
+  ));
+  return service;
 });
 
 final discoveryNotifierProvider =

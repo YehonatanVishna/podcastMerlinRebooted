@@ -40,16 +40,18 @@ class DiscoveryState {
 
 class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
   final MultisourceSearchService _searchService;
+  int _queryId = 0;
 
   DiscoveryNotifier(this._searchService) : super(const DiscoveryState()) {
     loadTrending();
   }
 
   Future<void> loadTrending() async {
+    final int id = ++_queryId;
     state = state.copyWith(isLoading: true, error: null, currentQuery: '', isTrending: true);
     try {
       final results = await _searchService.getTrending();
-      if (mounted) {
+      if (mounted && id == _queryId) {
         state = state.copyWith(
           results: results,
           isLoading: false,
@@ -57,7 +59,7 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
         );
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && id == _queryId) {
         state = state.copyWith(
           isLoading: false,
           error: 'Failed to load trending podcasts: $e',
@@ -72,10 +74,11 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
       return loadTrending();
     }
 
+    final int id = ++_queryId;
     state = state.copyWith(isLoading: true, error: null, currentQuery: trimmed, isTrending: false);
     try {
       final results = await _searchService.search(trimmed);
-      if (mounted) {
+      if (mounted && id == _queryId) {
         state = state.copyWith(
           results: results,
           isLoading: false,
@@ -83,7 +86,7 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
         );
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && id == _queryId) {
         state = state.copyWith(
           isLoading: false,
           error: 'Search failed: $e',

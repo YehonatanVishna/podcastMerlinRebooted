@@ -27,10 +27,13 @@ class ShellNavigationState {
       other is ShellNavigationState &&
           runtimeType == other.runtimeType &&
           selectedIndex == other.selectedIndex &&
-          selectedPodcast?.id == other.selectedPodcast?.id;
+          ((selectedPodcast == null && other.selectedPodcast == null) ||
+              (selectedPodcast != null &&
+                  other.selectedPodcast != null &&
+                  selectedPodcast!.rssUrl == other.selectedPodcast!.rssUrl));
 
   @override
-  int get hashCode => selectedIndex.hashCode ^ (selectedPodcast?.id.hashCode ?? 0);
+  int get hashCode => selectedIndex.hashCode ^ (selectedPodcast?.rssUrl.hashCode ?? 0);
 }
 
 class MainShell extends ConsumerStatefulWidget {
@@ -40,7 +43,7 @@ class MainShell extends ConsumerStatefulWidget {
   ConsumerState<MainShell> createState() => MainShellState();
 }
 
-class MainShellState extends ConsumerState<MainShell> {
+class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserver {
   final List<ShellNavigationState> _history = [
     const ShellNavigationState(selectedIndex: 0, selectedPodcast: null),
   ];
@@ -50,7 +53,9 @@ class MainShellState extends ConsumerState<MainShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       _playbackErrorSub = ref.read(audioHandlerProvider).onPlaybackError.listen((errorMsg) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -73,7 +78,17 @@ class MainShellState extends ConsumerState<MainShell> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      ref.read(audioHandlerProvider).flushCurrentPlaybackPosition();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _playbackErrorSub?.cancel();
     super.dispose();
   }
