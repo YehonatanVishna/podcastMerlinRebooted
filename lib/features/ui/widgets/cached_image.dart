@@ -235,10 +235,14 @@ class _AppCachedImageState extends State<AppCachedImage> {
             ),
           );
     } else {
+      final int? cacheW = widget.width != null ? (widget.width! * 2).round() : null;
+      final int? cacheH = widget.height != null ? (widget.height! * 2).round() : null;
       content = Image.network(
         cleanUrl,
         width: widget.width,
         height: widget.height,
+        cacheWidth: cacheW,
+        cacheHeight: cacheH,
         fit: widget.fit,
         errorBuilder: (context, error, stackTrace) => fallback,
       );

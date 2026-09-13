@@ -196,6 +196,34 @@ class TestEpisodesNotifier extends StateNotifier<EpisodesState> implements Episo
       state = state.copyWith(episodes: updatedList);
     }
   }
+
+  @override
+  Future<void> markAsPlayed(Episode episode, bool isPlayed) async {
+    final updatedList = state.episodes.map((e) {
+      if (e.guid == episode.guid) {
+        return e.copyWith(isPlayed: isPlayed, position: isPlayed ? e.duration : 0);
+      }
+      return e;
+    }).toList();
+    state = state.copyWith(episodes: updatedList);
+  }
+
+  @override
+  Future<void> togglePlayed(Episode episode) async {
+    await markAsPlayed(episode, !episode.isFinished);
+  }
+
+  @override
+  Future<void> markMultipleAsPlayed(List<Episode> episodes, bool isPlayed) async {
+    final guids = episodes.map((e) => e.guid).toSet();
+    final updatedList = state.episodes.map((e) {
+      if (guids.contains(e.guid)) {
+        return e.copyWith(isPlayed: isPlayed, position: isPlayed ? e.duration : 0);
+      }
+      return e;
+    }).toList();
+    state = state.copyWith(episodes: updatedList);
+  }
 }
 
 void main() {

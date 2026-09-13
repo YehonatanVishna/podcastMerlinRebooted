@@ -41,11 +41,15 @@ class SyncService {
     final username = await _storage.read(SecureStorageService.keyUsername);
     final password = await _storage.read(SecureStorageService.keyPassword);
 
-    if (serverUrl == null || serverUrl.isEmpty ||
-        username == null || username.isEmpty ||
-        password == null || password.isEmpty) {
-      lastError = 'Server credentials not configured. Please enter server URL, username, and password in Settings.';
-      return false;
+    final isGpodderConfigured = serverUrl != null && serverUrl.trim().isNotEmpty &&
+        username != null && username.trim().isNotEmpty &&
+        password != null && password.trim().isNotEmpty;
+
+    if (!isGpodderConfigured) {
+      // Local-only mode: refresh local podcast feeds directly without requiring gPodder
+      onProgress?.call(SyncStage.fetchingFeed, 'Refreshing local subscriptions...');
+      await _refreshLocalPodcastsDirectly(onProgress, isLocalOnlyMode: true);
+      return true;
     }
 
     onProgress?.call(SyncStage.connectingGpodder, 'Pinging gPodder service...');
@@ -261,14 +265,18 @@ class SyncService {
   }
 
   /// Refreshes all locally stored podcasts directly via RSS feeds in parallel
-  Future<void> _refreshLocalPodcastsDirectly(SyncProgressCallback? onProgress) async {
+  Future<void> _refreshLocalPodcastsDirectly(SyncProgressCallback? onProgress, {bool isLocalOnlyMode = false}) async {
     final localPodcasts = await _db.getAllPodcasts();
     if (localPodcasts.isEmpty) {
-      lastFeedWarnings.add('gPodder server is offline and no local podcasts are stored.');
+      if (!isLocalOnlyMode) {
+        lastFeedWarnings.add('gPodder server is offline and no local podcasts are stored.');
+      }
       return;
     }
 
-    lastFeedWarnings.add('gPodder server is offline. Refreshed ${localPodcasts.length} local subscription feeds directly via RSS.');
+    if (!isLocalOnlyMode) {
+      lastFeedWarnings.add('gPodder server is offline. Refreshed ${localPodcasts.length} local subscription feeds directly via RSS.');
+    }
 
     int refreshedCount = 0;
     final totalToRefresh = localPodcasts.length;
@@ -299,7 +307,7 @@ class SyncService {
   Future<void> _processInParallel<T>({
     required List<T> items,
     required Future<void> Function(T item) worker,
-    int concurrency = 6,
+    int concurrency = 4,
   }) async {
     if (items.isEmpty) return;
     int index = 0;
@@ -460,9 +468,10 @@ class SyncService {
 
       await _db.saveEpisodesBatch(episodes);
 
-      // Pre-cache podcast cover and episode image assets on device
-      ImageCacheService.precacheImageUrl(feedResult.imageUrl);
-      ImageCacheService.precacheBatch(episodes.map((e) => e.imageUrl));
+      // Pre-cache podcast cover only (on-demand loading for episode thumbnails prevents UI lag)
+      if (feedResult.imageUrl.isNotEmpty) {
+        ImageCacheService.precacheImageUrl(feedResult.imageUrl);
+      }
 
       return savedPod ?? podcast;
     } catch (e) {

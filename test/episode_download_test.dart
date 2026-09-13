@@ -1688,4 +1688,13 @@ class TestEpisodesNotifier extends StateNotifier<EpisodesState> implements Episo
 
   @override
   void updateEpisodeProgress(String mediaUrl, int position, bool isPlayed) {}
+
+  @override
+  Future<void> markAsPlayed(Episode episode, bool isPlayed) async {}
+
+  @override
+  Future<void> togglePlayed(Episode episode) async {}
+
+  @override
+  Future<void> markMultipleAsPlayed(List<Episode> episodes, bool isPlayed) async {}
 }
