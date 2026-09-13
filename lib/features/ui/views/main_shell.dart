@@ -27,10 +27,13 @@ class ShellNavigationState {
       other is ShellNavigationState &&
           runtimeType == other.runtimeType &&
           selectedIndex == other.selectedIndex &&
-          selectedPodcast?.id == other.selectedPodcast?.id;
+          ((selectedPodcast == null && other.selectedPodcast == null) ||
+              (selectedPodcast != null &&
+                  other.selectedPodcast != null &&
+                  selectedPodcast!.rssUrl == other.selectedPodcast!.rssUrl));
 
   @override
-  int get hashCode => selectedIndex.hashCode ^ (selectedPodcast?.id.hashCode ?? 0);
+  int get hashCode => selectedIndex.hashCode ^ (selectedPodcast?.rssUrl.hashCode ?? 0);
 }
 
 class MainShell extends ConsumerStatefulWidget {
@@ -52,6 +55,7 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       _playbackErrorSub = ref.read(audioHandlerProvider).onPlaybackError.listen((errorMsg) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(

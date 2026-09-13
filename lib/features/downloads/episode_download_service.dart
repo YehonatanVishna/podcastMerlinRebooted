@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
@@ -7,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../../core/database/database_helper.dart';
 import '../../core/models/episode.dart';
+import '../../core/models/podcast.dart';
 
 class DownloadTaskEvent {
   final int episodeId;
@@ -138,8 +140,8 @@ class EpisodeDownloadService {
   }
 
   String _sanitizeFileName(String mediaUrl, int episodeId) {
-    final bytes = md5.convert(mediaUrl.codeUnits).toString();
     final cleanUrl = mediaUrl.split('?').first.split('#').first.toLowerCase();
+    final bytes = md5.convert(utf8.encode(cleanUrl.isNotEmpty ? cleanUrl : mediaUrl)).toString();
     String ext = '.mp3';
     if (cleanUrl.endsWith('.m4a')) {
       ext = '.m4a';
@@ -157,14 +159,53 @@ class EpisodeDownloadService {
 
   Future<void> startDownload(Episode episode) async {
     int? epId = episode.id;
-    if (epId == null) {
+    Episode updatedEpisode = episode;
+
+    if (epId == null && episode.guid.isNotEmpty) {
       final found = await _db.getEpisodeByGuid(episode.guid);
       epId = found?.id;
+      if (found != null) {
+        updatedEpisode = found;
+      }
+    }
+    if (epId == null && episode.mediaUrl.isNotEmpty) {
+      final found = await _db.getEpisodeByMediaUrl(episode.mediaUrl);
+      epId = found?.id;
+      if (found != null) {
+        updatedEpisode = found;
+      }
+    }
+    if (epId == null) {
+      // Episode not in DB yet (e.g. from discovery/RSS). Ensure podcast exists and insert episode.
+      if (updatedEpisode.podcastId == null || updatedEpisode.podcastId! <= 0) {
+        if (updatedEpisode.podcastRss.isNotEmpty) {
+          final pod = await _db.getPodcastByRssUrl(updatedEpisode.podcastRss);
+          if (pod == null) {
+            final newPodId = await _db.insertPodcast(Podcast(
+              rssUrl: updatedEpisode.podcastRss,
+              title: updatedEpisode.podcastRss,
+              description: '',
+              imageUrl: updatedEpisode.imageUrl,
+              link: '',
+              lastUpdated: DateTime.now(),
+            ));
+            updatedEpisode = updatedEpisode.copyWith(podcastId: newPodId);
+          } else if (pod.id != null) {
+            updatedEpisode = updatedEpisode.copyWith(podcastId: pod.id);
+          }
+        }
+      }
+      await _db.insertEpisodes([updatedEpisode]);
+      final inserted = await _db.getEpisodeByMediaUrl(updatedEpisode.mediaUrl);
+      epId = inserted?.id;
+      if (inserted != null) {
+        updatedEpisode = inserted;
+      }
     }
     if (epId == null) return;
     _pausedEpisodeIds.remove(epId);
 
-    final updatedEpisode = episode.copyWith(id: epId);
+    updatedEpisode = updatedEpisode.copyWith(id: epId);
 
     // If already downloaded and file exists, do nothing
     if (updatedEpisode.isDownloaded && updatedEpisode.downloadPath != null) {
@@ -263,11 +304,45 @@ class EpisodeDownloadService {
             }
             startBytes = 0;
             retryCount++;
+            if (retryCount > maxRetries) {
+              await _db.updateEpisodeDownloadState(
+                epId,
+                status: DownloadStatus.failed,
+                error: 'HTTP 416 Range Not Satisfiable',
+              );
+              _emitEvent(
+                DownloadTaskEvent(
+                  episodeId: epId,
+                  mediaUrl: episode.mediaUrl,
+                  episodeTitle: episode.title,
+                  imageUrl: episode.imageUrl,
+                  status: DownloadStatus.failed,
+                  error: 'HTTP 416 Range Not Satisfiable',
+                ),
+              );
+              return;
+            }
             continue;
           }
 
           final isPartial = response.statusCode == 206;
-          if (!isPartial && startBytes > 0) {
+          if (isPartial) {
+            final contentRangeHeader = response.headers.value('content-range');
+            if (contentRangeHeader != null) {
+              final rangeMatch = RegExp(r'bytes\s+(\d+)-').firstMatch(contentRangeHeader);
+              if (rangeMatch != null) {
+                final rangeStart = int.tryParse(rangeMatch.group(1)!) ?? 0;
+                if (rangeStart != startBytes) {
+                  startBytes = 0;
+                  if (await partFile.exists()) {
+                    await partFile.delete();
+                  }
+                  retryCount++;
+                  continue;
+                }
+              }
+            }
+          } else if (startBytes > 0) {
             startBytes = 0;
             if (await partFile.exists()) {
               await partFile.delete();
@@ -391,6 +466,10 @@ class EpisodeDownloadService {
               );
             }
             return;
+          }
+
+          if (totalBytes > 0 && receivedBytes < totalBytes) {
+            throw Exception('Connection closed prematurely: received $receivedBytes of $totalBytes bytes');
           }
 
           final downloadedPart = File(partFilePath);
@@ -676,15 +755,16 @@ class EpisodeDownloadService {
   }
 
   Future<void> pauseAll() async {
-    final activeIds = List<int>.from(_activeDownloads.keys);
-    for (final id in activeIds) {
-      await pauseDownload(id);
-    }
     final queued = List<Episode>.from(_queuedEpisodes);
+    _queuedEpisodes.clear();
     for (final ep in queued) {
       if (ep.id != null) {
         await pauseDownload(ep.id!);
       }
+    }
+    final activeIds = List<int>.from(_activeDownloads.keys);
+    for (final id in activeIds) {
+      await pauseDownload(id);
     }
   }
 
@@ -720,15 +800,16 @@ class EpisodeDownloadService {
   }
 
   Future<void> cancelAllActive() async {
-    final activeIds = List<int>.from(_activeDownloads.keys);
-    for (final id in activeIds) {
-      await cancelDownload(id);
-    }
     final queued = List<Episode>.from(_queuedEpisodes);
+    _queuedEpisodes.clear();
     for (final ep in queued) {
       if (ep.id != null) {
         await cancelDownload(ep.id!);
       }
+    }
+    final activeIds = List<int>.from(_activeDownloads.keys);
+    for (final id in activeIds) {
+      await cancelDownload(id);
     }
   }
 
@@ -763,8 +844,12 @@ class EpisodeDownloadService {
 
   Future<void> deleteDownload(Episode episode) async {
     int? epId = episode.id;
-    if (epId == null) {
+    if (epId == null && episode.guid.isNotEmpty) {
       final found = await _db.getEpisodeByGuid(episode.guid);
+      epId = found?.id;
+    }
+    if (epId == null && episode.mediaUrl.isNotEmpty) {
+      final found = await _db.getEpisodeByMediaUrl(episode.mediaUrl);
       epId = found?.id;
     }
     if (epId == null) return;
@@ -775,6 +860,12 @@ class EpisodeDownloadService {
       _queuedEpisodes.removeWhere((e) => e.id == epId);
     }
 
+    String? downloadPath = episode.downloadPath;
+    if (downloadPath == null) {
+      final dbEp = await _db.getEpisodeById(epId);
+      downloadPath = dbEp?.downloadPath;
+    }
+
     try {
       final dir = await getDownloadsDirectory();
       final fileName = _sanitizeFileName(episode.mediaUrl, epId);
@@ -782,11 +873,15 @@ class EpisodeDownloadService {
       if (partFile.existsSync()) {
         partFile.deleteSync();
       }
+      final computedFinalFile = File(p.join(dir.path, fileName));
+      if (computedFinalFile.existsSync()) {
+        computedFinalFile.deleteSync();
+      }
     } catch (_) {}
 
-    if (episode.downloadPath != null) {
+    if (downloadPath != null) {
       try {
-        final file = File(episode.downloadPath!);
+        final file = File(downloadPath);
         if (file.existsSync()) {
           file.deleteSync();
         }

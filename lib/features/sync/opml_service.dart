@@ -59,7 +59,11 @@ class OpmlService {
   /// Recursively traverses nested outlines (e.g. folders / categories).
   /// Gracefully catches XML parse errors and returns empty list or partial list without throwing.
   static List<OpmlOutline> parseOpml(String xmlContent) {
-    final trimmed = xmlContent.trim();
+    var cleanContent = xmlContent;
+    if (cleanContent.startsWith('\uFEFF')) {
+      cleanContent = cleanContent.substring(1);
+    }
+    final trimmed = cleanContent.trim();
     if (trimmed.isEmpty) return const [];
 
     try {
@@ -284,22 +288,25 @@ class OpmlService {
       final fileName = defaultFileName ?? 'subscriptions.opml';
       final picker = filePicker ?? FilePickerPlatform.instance;
 
-      final savedUri = await picker.saveFile(
+      final dynamic savedResult = await picker.saveFile(
         dialogTitle: 'Export Subscriptions to OPML',
         fileName: fileName,
         bytes: bytes,
         mimeType: 'text/x-opml',
       );
 
-      if (savedUri == null) return null;
+      if (savedResult == null) return null;
 
-      if (savedUri.scheme == 'file') {
-        return savedUri.toFilePath();
-      } else if (savedUri.scheme.isEmpty) {
-        return savedUri.path;
-      } else {
-        return savedUri.toString();
+      if (savedResult is Uri) {
+        if (savedResult.scheme == 'file') {
+          return savedResult.toFilePath();
+        } else if (savedResult.scheme.isEmpty) {
+          return savedResult.path;
+        } else {
+          return savedResult.toString();
+        }
       }
+      return savedResult.toString();
     } catch (_) {
       return null;
     }

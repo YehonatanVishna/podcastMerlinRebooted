@@ -53,6 +53,10 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   StreamSubscription<PlaybackEvent>? _playbackEventSub;
   StreamSubscription<PlayerState>? _playerStateSub;
   StreamSubscription<Duration>? _positionSub;
+  StreamSubscription? _interruptionSub;
+  StreamSubscription? _becomingNoisySub;
+  bool _wasPlayingBeforeInterruption = false;
+  int _playRequestId = 0;
 
   final Future<void> Function(String url)? urlLoader;
   double _speed = 1.0;
@@ -229,6 +233,34 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   Stream<PositionUpdateEvent> get onPositionUpdated => _positionUpdateController.stream;
   Episode? get currentEpisode => _currentEpisode;
 
+  void updateEpisodeDownloadStatus({
+    required int episodeId,
+    required String mediaUrl,
+    required DownloadStatus status,
+    double progress = 0.0,
+    int downloadedBytes = 0,
+    int totalBytes = 0,
+    String? downloadPath,
+    String? error,
+  }) {
+    if (_currentEpisode == null) return;
+    final matches = (_currentEpisode!.id != null && _currentEpisode!.id == episodeId) ||
+        (_currentEpisode!.mediaUrl.isNotEmpty && _currentEpisode!.mediaUrl == mediaUrl);
+    if (!matches) return;
+
+    _currentEpisode = _currentEpisode!.copyWith(
+      id: episodeId,
+      downloadStatus: status,
+      downloadProgress: progress,
+      downloadedBytes: downloadedBytes,
+      totalBytes: totalBytes,
+      downloadPath: downloadPath ?? (status == DownloadStatus.none ? null : _currentEpisode!.downloadPath),
+      clearDownloadPath: status == DownloadStatus.none,
+      downloadError: error,
+      clearDownloadError: status != DownloadStatus.failed,
+    );
+  }
+
   // Queue getters
   Stream<List<Episode>> get queueStream => _queueController.stream;
   List<Episode> get currentQueue => List.unmodifiable(_queue);
@@ -250,7 +282,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration.speech());
 
-      session.interruptionEventStream.listen((event) {
+      _interruptionSub = session.interruptionEventStream.listen((event) {
         if (event.begin) {
           switch (event.type) {
             case AudioInterruptionType.duck:
@@ -258,6 +290,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
               break;
             case AudioInterruptionType.pause:
             case AudioInterruptionType.unknown:
+              _wasPlayingBeforeInterruption = _player.playing;
               pause();
               break;
           }
@@ -267,7 +300,9 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
               _player.setVolume(1.0);
               break;
             case AudioInterruptionType.pause:
-              play();
+              if (_wasPlayingBeforeInterruption) {
+                play();
+              }
               break;
             case AudioInterruptionType.unknown:
               break;
@@ -275,7 +310,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         }
       });
 
-      session.becomingNoisyEventStream.listen((_) {
+      _becomingNoisySub = session.becomingNoisyEventStream.listen((_) {
         pause();
       });
     } catch (e) {
@@ -292,6 +327,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
             MediaControl.rewind,
             if (playing) MediaControl.pause else MediaControl.play,
             MediaControl.fastForward,
+            if (_queue.isNotEmpty) MediaControl.skipToNext,
             MediaControl.stop,
           ],
           systemActions: const {
@@ -436,6 +472,25 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     }
 
     Episode epToPlay = episode;
+    Episode? dbEp;
+    if (epToPlay.id != null) {
+      dbEp = await _db.getEpisodeById(epToPlay.id!);
+    } else if (epToPlay.guid.isNotEmpty) {
+      dbEp = await _db.getEpisodeByGuid(epToPlay.guid);
+    } else if (epToPlay.mediaUrl.isNotEmpty) {
+      dbEp = await _db.getEpisodeByMediaUrl(epToPlay.mediaUrl);
+    }
+    if (dbEp != null) {
+      epToPlay = epToPlay.copyWith(
+        id: dbEp.id,
+        podcastId: epToPlay.podcastId ?? dbEp.podcastId,
+        podcastRss: epToPlay.podcastRss.isNotEmpty ? epToPlay.podcastRss : dbEp.podcastRss,
+        downloadPath: dbEp.downloadPath,
+        downloadStatus: dbEp.downloadStatus,
+        downloadProgress: dbEp.downloadProgress,
+        downloadedBytes: dbEp.downloadedBytes,
+      );
+    }
     String showTitle = 'Podcast Merlin';
     if (epToPlay.podcastId != null && epToPlay.podcastId! > 0) {
       final pod = await _db.getPodcastById(epToPlay.podcastId!);
@@ -449,8 +504,8 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       }
     }
 
-    final bool wasFinished = epToPlay.duration > 0 &&
-        epToPlay.position >= (epToPlay.duration - 2);
+    final bool wasFinished = epToPlay.isFinished ||
+        (epToPlay.duration > 0 && epToPlay.position >= (epToPlay.duration - 2));
     if (wasFinished) {
       epToPlay = epToPlay.copyWith(position: 0, isPlayed: false);
       await _db.updateEpisodePlaybackState(epToPlay.mediaUrl, 0, isPlayed: false);
@@ -512,6 +567,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         MediaControl.rewind,
         MediaControl.pause,
         MediaControl.fastForward,
+        if (_queue.isNotEmpty) MediaControl.skipToNext,
         MediaControl.stop,
       ],
       systemActions: const {
@@ -574,13 +630,18 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       return;
     }
 
+    final int currentRequestId = ++_playRequestId;
     try {
       await _prepareAudioSource(epToPlay);
-      await play();
+      if (currentRequestId != _playRequestId) return;
+      if (playbackState.value.playing) {
+        await play();
+      }
       _startPeriodicPositionSync();
     } on PlayerInterruptedException {
       // Swallowed on rapid track change
     } catch (e) {
+      if (currentRequestId != _playRequestId) return;
       final errorMsg = formatAudioBackendError(e);
       if (kDebugMode) print(errorMsg);
       final errorState = playbackState.value.copyWith(
@@ -698,10 +759,10 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         await _enqueueCurrentPositionAction();
         return;
       }
-      await _player.stop();
-      await _setActiveAudioSession(false);
       _stopPeriodicPositionSync();
       await _enqueueCurrentPositionAction();
+      await _player.stop();
+      await _setActiveAudioSession(false);
     } catch (_) {}
   }
 
@@ -871,6 +932,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         ? _currentEpisode!.duration
         : (_player.duration?.inSeconds ?? _currentEpisode!.duration));
     _currentEpisode = _currentEpisode!.copyWith(position: totalSec, isPlayed: true);
+    _lastSyncedPosition = totalSec;
     await _db.updateEpisodePlaybackState(_currentEpisode!.mediaUrl, totalSec, isPlayed: true);
     await _db.saveActivePlayback(_currentEpisode!, position: totalSec, isCompleted: true);
     if (!_positionUpdateController.isClosed) {
@@ -1092,6 +1154,8 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     _playbackEventSub?.cancel();
     _positionSub?.cancel();
     _playerStateSub?.cancel();
+    _interruptionSub?.cancel();
+    _becomingNoisySub?.cancel();
     _player.dispose();
     _positionUpdateController.close();
     _queueController.close();

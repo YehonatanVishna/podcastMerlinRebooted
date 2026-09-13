@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/episode.dart';
 import '../../../core/providers/app_providers.dart';
 
-final RegExp timestampRegex = RegExp(r'(?:(\d{1,2}):)?([0-5]?\d):([0-5]\d)');
+final RegExp timestampRegex = RegExp(r'(?:(\d{1,2}):)?(\d{1,3}):([0-5]\d)');
 
 /// Converts a timestamp string (e.g. "05:30", "1:15:30", "02:00:00") into a [Duration].
 Duration parseTimestampToDuration(String timestamp) {

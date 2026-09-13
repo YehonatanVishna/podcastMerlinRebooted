@@ -50,9 +50,18 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     ref.invalidate(downloadStorageUsageBytesProvider);
     ref.invalidate(downloadedEpisodesCountProvider);
 
+    if (!mounted) return;
     setState(() {
       _isLoading = false;
     });
+  }
+
+  @override
+  void dispose() {
+    _serverController.dispose();
+    _userController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 
   Future<void> _saveCredentials() async {
@@ -97,6 +106,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       password: _passwordController.text.trim(),
     );
 
+    if (!mounted) return;
     setState(() {
       _isTesting = false;
       _isSuccessStatus = errorDetail == null;

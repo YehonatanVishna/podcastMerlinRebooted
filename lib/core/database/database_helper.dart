@@ -223,6 +223,11 @@ class DatabaseHelper {
         if (!activeCols.contains('duration')) {
           await db.execute('ALTER TABLE active_playback ADD COLUMN duration INTEGER DEFAULT 0;');
         }
+        if (!activeCols.contains('podcastRss')) {
+          try {
+            await db.execute('ALTER TABLE active_playback ADD COLUMN podcastRss TEXT;');
+          } catch (_) {}
+        }
         try {
           await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_media_url ON episodes(mediaUrl);');
         } catch (_) {}
@@ -249,6 +254,9 @@ class DatabaseHelper {
             version: 1,
             onConfigure: (db) async {
               await db.execute('PRAGMA foreign_keys = ON;');
+              try {
+                await db.execute('PRAGMA busy_timeout = 5000;');
+              } catch (_) {}
             },
             onCreate: _createDB,
           )
@@ -257,6 +265,12 @@ class DatabaseHelper {
             version: 1,
             onConfigure: (db) async {
               await db.execute('PRAGMA foreign_keys = ON;');
+              try {
+                await db.execute('PRAGMA journal_mode = WAL;');
+              } catch (_) {}
+              try {
+                await db.execute('PRAGMA busy_timeout = 5000;');
+              } catch (_) {}
             },
             onCreate: _createDB,
           );
@@ -372,6 +386,10 @@ class DatabaseHelper {
     final existing = await getPodcastByUrl(podcast.rssUrl);
     if (existing != null) {
       final map = podcast.toMap();
+      if (_podcastRssUrlCol != 'rssUrl') {
+        map.remove('rssUrl');
+        map[_podcastRssUrlCol] = podcast.rssUrl;
+      }
       final id = podcast.id ?? existing.id;
       if (id != null) {
         map['id'] = id;
@@ -384,11 +402,21 @@ class DatabaseHelper {
       );
       return id ?? existing.id ?? 0;
     } else {
-      return db.insert(
+      final insertMap = podcast.toMap();
+      if (_podcastRssUrlCol != 'rssUrl') {
+        insertMap.remove('rssUrl');
+        insertMap[_podcastRssUrlCol] = podcast.rssUrl;
+      }
+      final insertedId = await db.insert(
         'podcasts',
-        podcast.toMap(),
+        insertMap,
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
+      if (insertedId == 0) {
+        final found = await getPodcastByUrl(podcast.rssUrl);
+        return found?.id ?? 0;
+      }
+      return insertedId;
     }
   }
 
@@ -535,7 +563,7 @@ class DatabaseHelper {
           'title': episode.title,
           'description': episode.description,
           _mediaUrlCol: episode.mediaUrl,
-          _pubDateCol: episode.publishedAt?.toIso8601String(),
+          _pubDateCol: episode.publishedAt?.toIso8601String() ?? existing.publishedAt?.toIso8601String(),
           'duration': episode.duration > 0 ? episode.duration : existing.duration,
           'position': finalPosition,
           _isPlayedCol: finalIsPlayed ? 1 : 0,
@@ -632,7 +660,7 @@ class DatabaseHelper {
       LEFT JOIN podcasts p ON e.$_podcastIdCol = p.id
       WHERE $whereClause
       ORDER BY e.$_pubDateCol DESC
-      ${limit != null ? 'LIMIT $limit' : ''}
+      ${limit != null ? 'LIMIT $limit' : (offset != null ? 'LIMIT -1' : '')}
       ${offset != null ? 'OFFSET $offset' : ''}
     ''';
 
@@ -668,7 +696,7 @@ class DatabaseHelper {
       LEFT JOIN podcasts p ON e.$_podcastIdCol = p.id
       WHERE $whereClause
       ORDER BY e.$_pubDateCol DESC
-      ${limit != null ? 'LIMIT $limit' : ''}
+      ${limit != null ? 'LIMIT $limit' : (offset != null ? 'LIMIT -1' : '')}
       ${offset != null ? 'OFFSET $offset' : ''}
     ''';
 
@@ -878,7 +906,7 @@ class DatabaseHelper {
     final query = '''
       SELECT e.*, p.$_podcastRssUrlCol AS podcastRss
       FROM episodes e
-      JOIN podcasts p ON e.$_podcastIdCol = p.id
+      LEFT JOIN podcasts p ON e.$_podcastIdCol = p.id
       WHERE e.$_isStarredCol = 1
       ORDER BY e.$_pubDateCol DESC
       LIMIT $limit
@@ -1491,6 +1519,17 @@ class DatabaseHelper {
     return result;
   }
 
+  Future<int> clearQueuedGPodderActionsByIds(List<int> ids) async {
+    if (ids.isEmpty) return 0;
+    final db = await instance.database;
+    final placeholders = List.filled(ids.length, '?').join(',');
+    return db.delete(
+      'gpodder_actions',
+      where: 'id IN ($placeholders)',
+      whereArgs: ids,
+    );
+  }
+
   Future<int> clearQueuedGPodderActionsUpTo(int maxId) async {
     final db = await instance.database;
     return db.delete(
@@ -1501,16 +1540,14 @@ class DatabaseHelper {
   }
 
   Future<int> markActionsSynced(dynamic actionsOrIds) async {
+    List<int> ids = [];
     if (actionsOrIds is List<int>) {
-      if (actionsOrIds.isEmpty) return 0;
-      final maxId = actionsOrIds.fold(0, (prev, curr) => curr > prev ? curr : prev);
-      return clearQueuedGPodderActionsUpTo(maxId);
+      ids = actionsOrIds.where((id) => id > 0).toList();
     } else if (actionsOrIds is List<GPodderAction>) {
-      if (actionsOrIds.isEmpty) return 0;
-      final maxId = actionsOrIds.map((a) => a.id ?? 0).fold(0, (prev, curr) => curr > prev ? curr : prev);
-      return clearQueuedGPodderActionsUpTo(maxId);
+      ids = actionsOrIds.map((a) => a.id ?? 0).where((id) => id > 0).toList();
     }
-    return 0;
+    if (ids.isEmpty) return 0;
+    return clearQueuedGPodderActionsByIds(ids);
   }
 
   // SUBSCRIPTION OFFLINE BACKLOG & DEDUPLICATION
@@ -1763,6 +1800,7 @@ class DatabaseHelper {
           'mediaUrl': episode.mediaUrl,
           'title': episode.title,
           'podcastTitle': podcastTitle ?? episode.podcastRss,
+          'podcastRss': episode.podcastRss,
           'imageUrl': episode.imageUrl,
           'duration': episode.duration,
           'position': pos,
@@ -1782,6 +1820,7 @@ class DatabaseHelper {
             'mediaUrl': episode.mediaUrl,
             'title': episode.title,
             'podcastTitle': podcastTitle ?? episode.podcastRss,
+            'podcastRss': episode.podcastRss,
             'imageUrl': episode.imageUrl,
             'duration': episode.duration,
             'position': pos,
@@ -1808,6 +1847,7 @@ class DatabaseHelper {
         a.guid AS activeGuid,
         a.title AS activeTitle,
         a.podcastTitle AS activePodcastTitle,
+        a.podcastRss AS activePodcastRss,
         a.imageUrl AS activeImageUrl,
         a.duration AS activeDuration,
         a.mediaUrl AS activeMediaUrl,
@@ -1831,6 +1871,12 @@ class DatabaseHelper {
       return ep.copyWith(position: activePos);
     }
 
+    final rawRss = row['activePodcastRss'] as String?;
+    final fallbackTitle = row['activePodcastTitle'] as String? ?? '';
+    final resolvedRss = (rawRss != null && rawRss.isNotEmpty)
+        ? rawRss
+        : (fallbackTitle.startsWith('http') ? fallbackTitle : '');
+
     return Episode(
       guid: row['activeGuid'] as String? ?? row['activeMediaUrl'] as String? ?? '',
       title: row['activeTitle'] as String? ?? 'Podcast Merlin',
@@ -1839,7 +1885,7 @@ class DatabaseHelper {
       duration: (row['activeDuration'] as num?)?.toInt() ?? 0,
       position: activePos,
       imageUrl: row['activeImageUrl'] as String? ?? '',
-      podcastRss: row['activePodcastTitle'] as String? ?? '',
+      podcastRss: resolvedRss,
     );
   }
 

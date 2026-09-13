@@ -35,6 +35,7 @@ class Podcast {
     DateTime? lastUpdated,
     bool? isDead,
     String? lastFeedError,
+    bool clearLastFeedError = false,
     int? feedErrorCount,
   }) {
     return Podcast(
@@ -46,7 +47,7 @@ class Podcast {
       link: link ?? this.link,
       lastUpdated: lastUpdated ?? this.lastUpdated,
       isDead: isDead ?? this.isDead,
-      lastFeedError: lastFeedError ?? this.lastFeedError,
+      lastFeedError: clearLastFeedError ? null : (lastFeedError ?? this.lastFeedError),
       feedErrorCount: feedErrorCount ?? this.feedErrorCount,
     );
   }
@@ -70,7 +71,7 @@ class Podcast {
     final lastUpdatedVal = map['lastUpdated'] ?? map['last_updated'];
     final rawIsDead = map['isDead'] ?? map['is_dead'];
     return Podcast(
-      id: map['id'] as int?,
+      id: (map['id'] as num?)?.toInt(),
       rssUrl: (map['rssUrl'] ?? map['rss_url'] ?? '').toString(),
       title: (map['title'] ?? 'Untitled Podcast').toString(),
       imageUrl: (map['imageUrl'] ?? map['image_url'] ?? '').toString(),
@@ -78,8 +79,8 @@ class Podcast {
       link: (map['websiteUrl'] ?? map['link'] ?? '').toString(),
       lastUpdated: lastUpdatedVal != null ? DateTime.tryParse(lastUpdatedVal.toString()) : null,
       isDead: rawIsDead == 1 || rawIsDead == true,
-      lastFeedError: map['lastFeedError'] ?? map['last_feed_error'],
-      feedErrorCount: (map['feedErrorCount'] ?? map['feed_error_count'] ?? 0) as int,
+      lastFeedError: (map['lastFeedError'] ?? map['last_feed_error'])?.toString(),
+      feedErrorCount: ((map['feedErrorCount'] ?? map['feed_error_count'] ?? 0) as num).toInt(),
     );
   }
 }

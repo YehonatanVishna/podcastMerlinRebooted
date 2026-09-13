@@ -1195,6 +1195,7 @@ class _EpisodeTile extends StatelessWidget {
         }
 
         final showProgress = displayPosition > 0 && !isFinished;
+        final isCompact = MediaQuery.sizeOf(context).width < 600;
 
         final tile = ListTile(
           selected: isSelected,
@@ -1322,7 +1323,7 @@ class _EpisodeTile extends StatelessWidget {
                           ),
                     ),
                   ],
-                  if (episode.isStarred) ...[
+                  if (episode.isStarred && isCompact) ...[
                     const Icon(Icons.star, size: 13, color: Colors.amber),
                   ],
                 ],
