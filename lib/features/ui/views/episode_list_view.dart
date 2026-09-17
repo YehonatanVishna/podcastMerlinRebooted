@@ -10,6 +10,7 @@ import '../widgets/cached_image.dart';
 import '../widgets/purified_html_text.dart';
 import '../widgets/sync_error_banner.dart';
 import '../widgets/timestamped_description.dart';
+import 'playback_history_view.dart';
 
 class EpisodeListView extends ConsumerStatefulWidget {
   final Podcast? podcast;
@@ -164,7 +165,17 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
         .where((e) => e.id != null && _selectedEpisodeIds.contains(e.id) && e.isDownloaded)
         .length;
 
-    return Scaffold(
+    return PopScope(
+      canPop: !_isSelectionMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _isSelectionMode) {
+          setState(() {
+            _isSelectionMode = false;
+            _selectedEpisodeIds.clear();
+          });
+        }
+      },
+      child: Scaffold(
       appBar: _isSelectionMode
           ? AppBar(
               leading: IconButton(
@@ -179,6 +190,54 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
               ),
               title: Text('${_selectedEpisodeIds.length} selected'),
               actions: [
+                IconButton(
+                  icon: const Icon(Icons.check_circle_outline),
+                  tooltip: 'Mark Selected as Played',
+                  onPressed: _selectedEpisodeIds.isEmpty
+                      ? null
+                      : () {
+                          final selectedEps = displayedEpisodes
+                              .where((e) => e.id != null && _selectedEpisodeIds.contains(e.id))
+                              .toList();
+                          ref
+                              .read(episodesNotifierProvider(widget.podcast?.id).notifier)
+                              .markMultipleAsPlayed(selectedEps, true);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Marked ${selectedEps.length} episodes as played'),
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                          setState(() {
+                            _selectedEpisodeIds.clear();
+                            _isSelectionMode = false;
+                          });
+                        },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.radio_button_unchecked),
+                  tooltip: 'Mark Selected as Unplayed',
+                  onPressed: _selectedEpisodeIds.isEmpty
+                      ? null
+                      : () {
+                          final selectedEps = displayedEpisodes
+                              .where((e) => e.id != null && _selectedEpisodeIds.contains(e.id))
+                              .toList();
+                          ref
+                              .read(episodesNotifierProvider(widget.podcast?.id).notifier)
+                              .markMultipleAsPlayed(selectedEps, false);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Marked ${selectedEps.length} episodes as unplayed'),
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                          setState(() {
+                            _selectedEpisodeIds.clear();
+                            _isSelectionMode = false;
+                          });
+                        },
+                ),
                 IconButton(
                   icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
                   tooltip: allSelected ? 'Deselect All' : 'Select All',
@@ -219,6 +278,17 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
                   : null,
               title: Text(widget.podcast?.title ?? 'All Episodes'),
               actions: [
+                IconButton(
+                  icon: const Icon(Icons.history),
+                  tooltip: 'Playback History',
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const PlaybackHistoryView(),
+                      ),
+                    );
+                  },
+                ),
                 IconButton(
                   icon: const Icon(Icons.checklist_rounded),
                   tooltip: 'Select episodes',
@@ -328,6 +398,7 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
           ),
         ],
       ),
+    ),
     );
   }
 
@@ -671,6 +742,9 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
                       },
                       onTap: () => _showEpisodeDetailsModal(context, ep),
                       onPlay: () => audioHandler.playEpisode(ep),
+                      onTogglePlayed: () => ref
+                          .read(episodesNotifierProvider(widget.podcast?.id).notifier)
+                          .togglePlayed(ep),
                       onToggleStar: () => ref
                           .read(episodesNotifierProvider(widget.podcast?.id).notifier)
                           .toggleStar(ep),
@@ -902,6 +976,29 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 icon: Icon(
+                  effectiveEp.isFinished ? Icons.check_circle_outline : Icons.check_circle,
+                  color: effectiveEp.isFinished ? null : Theme.of(context).colorScheme.primary,
+                ),
+                label: Text(effectiveEp.isFinished ? 'Mark as Unplayed' : 'Mark as Played'),
+                onPressed: () async {
+                  Navigator.pop(modalCtx);
+                  await ref
+                      .read(episodesNotifierProvider(widget.podcast?.id).notifier)
+                      .togglePlayed(effectiveEp);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(effectiveEp.isFinished ? 'Marked as unplayed' : 'Marked as played'),
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                },
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                icon: Icon(
                   effectiveEp.isStarred ? Icons.star : Icons.star_border,
                   color: effectiveEp.isStarred ? Colors.amber : null,
                 ),
@@ -1024,6 +1121,7 @@ class _EpisodeTile extends StatelessWidget {
   final VoidCallback? onLongPress;
   final VoidCallback onTap;
   final VoidCallback onPlay;
+  final VoidCallback? onTogglePlayed;
   final VoidCallback onToggleStar;
   final VoidCallback? onDownload;
   final VoidCallback? onCancelDownload;
@@ -1038,6 +1136,7 @@ class _EpisodeTile extends StatelessWidget {
     this.onLongPress,
     required this.onTap,
     required this.onPlay,
+    this.onTogglePlayed,
     required this.onToggleStar,
     this.onDownload,
     this.onCancelDownload,
@@ -1356,6 +1455,8 @@ class _EpisodeTile extends StatelessWidget {
                           onDeleteDownload?.call();
                         } else if (value == 'star') {
                           onToggleStar();
+                        } else if (value == 'toggle_played') {
+                          onTogglePlayed?.call();
                         } else if (value == 'play_next') {
                           audioHandler?.addToQueue(episode, playNext: true);
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -1402,6 +1503,19 @@ class _EpisodeTile extends StatelessWidget {
                               ],
                             ),
                           ),
+                        PopupMenuItem(
+                          value: 'toggle_played',
+                          child: Row(
+                            children: [
+                              Icon(
+                                episode.isFinished ? Icons.check_circle_outline : Icons.check_circle,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Text(episode.isFinished ? 'Mark as Unplayed' : 'Mark as Played'),
+                            ],
+                          ),
+                        ),
                         PopupMenuItem(
                           value: 'star',
                           child: Row(

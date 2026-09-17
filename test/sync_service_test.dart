@@ -109,7 +109,7 @@ void main() {
       await database.delete('podcasts');
     });
 
-    test('performFullSync returns false when credentials missing', () async {
+    test('performFullSync returns false when credentials missing and gPodder required', () async {
       final emptyStorage = TestSecureStorageService();
       final syncService = SyncService(
         apiClient: TestGPodderApiClient(),
@@ -117,7 +117,7 @@ void main() {
         db: db,
       );
 
-      final result = await syncService.performFullSync();
+      final result = await syncService.performFullSync(requireGpodder: true);
       expect(result, isFalse);
     });
 

@@ -7,89 +7,171 @@ import '../../sync/opml_ui_helper.dart';
 import '../widgets/cached_image.dart';
 import '../widgets/sync_error_banner.dart';
 
-class PodcastCatalogView extends ConsumerWidget {
+class PodcastCatalogView extends ConsumerStatefulWidget {
   final ValueChanged<Podcast>? onPodcastSelected;
 
   const PodcastCatalogView({super.key, this.onPodcastSelected});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PodcastCatalogView> createState() => _PodcastCatalogViewState();
+}
+
+class _PodcastCatalogViewState extends ConsumerState<PodcastCatalogView> {
+  final TextEditingController _searchController = TextEditingController();
+  bool _isSearching = false;
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final podcastsState = ref.watch(podcastsNotifierProvider);
     final syncStatus = ref.watch(syncStatusNotifierProvider);
 
-    return Scaffold(
+    return PopScope(
+      canPop: !_isSearching,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _isSearching) {
+          setState(() {
+            _isSearching = false;
+            _searchQuery = '';
+            _searchController.clear();
+          });
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SvgPicture.asset(
-              'assets/images/logo.svg',
-              width: 28,
-              height: 28,
-            ),
-            const SizedBox(width: 10),
-            const Flexible(
-              child: Text(
-                'Podcast Merlin',
-                overflow: TextOverflow.ellipsis,
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontSize: 16,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Search subscriptions...',
+                  border: InputBorder.none,
+                  hintStyle: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                  ),
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          tooltip: 'Clear search',
+                          onPressed: () {
+                            setState(() {
+                              _searchQuery = '';
+                              _searchController.clear();
+                            });
+                          },
+                        )
+                      : null,
+                ),
+                onChanged: (val) {
+                  setState(() {
+                    _searchQuery = val.trim();
+                  });
+                },
+              )
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SvgPicture.asset(
+                    'assets/images/logo.svg',
+                    width: 28,
+                    height: 28,
+                  ),
+                  const SizedBox(width: 10),
+                  const Flexible(
+                    child: Text(
+                      'Podcast Merlin',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ),
+        actions: [
+          if (_isSearching)
+            IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: 'Close search',
+              onPressed: () {
+                setState(() {
+                  _isSearching = false;
+                  _searchQuery = '';
+                  _searchController.clear();
+                });
+              },
+            )
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.search),
+              tooltip: 'Search Subscriptions',
+              onPressed: () {
+                setState(() {
+                  _isSearching = true;
+                });
+              },
+            ),
+            IconButton(
+              icon: syncStatus.isSyncing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                    )
+                  : const Icon(Icons.refresh),
+              tooltip: syncStatus.isSyncing ? (syncStatus.currentTask ?? 'Syncing...') : 'Sync & Refresh All',
+              onPressed: syncStatus.isSyncing
+                  ? null
+                  : () {
+                      ref.read(podcastsNotifierProvider.notifier).refreshAll();
+                    },
+            ),
+            IconButton(
+              icon: const Icon(Icons.add),
+              tooltip: 'Subscribe to RSS Feed',
+              onPressed: syncStatus.isSyncing ? null : () => _showAddPodcastDialog(context, ref),
+            ),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert),
+              tooltip: 'OPML & More',
+              onSelected: (val) {
+                if (val == 'import_opml') {
+                  _showImportOpmlDialog(context, ref);
+                } else if (val == 'export_opml') {
+                  _exportOpml(context, ref);
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'import_opml',
+                  child: Row(
+                    children: [
+                      Icon(Icons.file_download_outlined, size: 20),
+                      SizedBox(width: 12),
+                      Text('Import OPML'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'export_opml',
+                  child: Row(
+                    children: [
+                      Icon(Icons.file_upload_outlined, size: 20),
+                      SizedBox(width: 12),
+                      Text('Export OPML'),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ],
-        ),
-        actions: [
-          IconButton(
-            icon: syncStatus.isSyncing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2.5),
-                  )
-                : const Icon(Icons.refresh),
-            tooltip: syncStatus.isSyncing ? (syncStatus.currentTask ?? 'Syncing...') : 'Sync & Refresh All',
-            onPressed: syncStatus.isSyncing
-                ? null
-                : () {
-                    ref.read(podcastsNotifierProvider.notifier).refreshAll();
-                  },
-          ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: 'Subscribe to RSS Feed',
-            onPressed: syncStatus.isSyncing ? null : () => _showAddPodcastDialog(context, ref),
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            tooltip: 'OPML & More',
-            onSelected: (val) {
-              if (val == 'import_opml') {
-                _showImportOpmlDialog(context, ref);
-              } else if (val == 'export_opml') {
-                _exportOpml(context, ref);
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: 'import_opml',
-                child: Row(
-                  children: [
-                    Icon(Icons.file_download_outlined, size: 20),
-                    SizedBox(width: 12),
-                    Text('Import OPML'),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: 'export_opml',
-                child: Row(
-                  children: [
-                    Icon(Icons.file_upload_outlined, size: 20),
-                    SizedBox(width: 12),
-                    Text('Export OPML'),
-                  ],
-                ),
-              ),
-            ],
-          ),
         ],
       ),
       body: Column(
@@ -180,6 +262,40 @@ class PodcastCatalogView extends ConsumerWidget {
                   );
                 }
 
+                final filteredPodcasts = _searchQuery.isEmpty
+                    ? podcasts
+                    : podcasts.where((p) {
+                        final q = _searchQuery.toLowerCase();
+                        return p.title.toLowerCase().contains(q) ||
+                            p.description.toLowerCase().contains(q);
+                      }).toList();
+
+                if (filteredPodcasts.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.search_off, size: 64, color: Colors.grey),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No subscriptions matching "$_searchQuery"',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton(
+                          onPressed: () {
+                            setState(() {
+                              _searchQuery = '';
+                              _searchController.clear();
+                            });
+                          },
+                          child: const Text('Clear Search'),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
                 return LayoutBuilder(
                   builder: (context, constraints) {
                     final width = constraints.maxWidth;
@@ -214,12 +330,12 @@ class PodcastCatalogView extends ConsumerWidget {
                         crossAxisSpacing: spacing,
                         mainAxisSpacing: spacing,
                       ),
-                      itemCount: podcasts.length,
+                      itemCount: filteredPodcasts.length,
                       itemBuilder: (context, index) {
-                        final pod = podcasts[index];
+                        final pod = filteredPodcasts[index];
                         return _PodcastCard(
                           podcast: pod,
-                          onTap: () => onPodcastSelected?.call(pod),
+                          onTap: () => widget.onPodcastSelected?.call(pod),
                           onDelete: () {
                             ref.read(podcastsNotifierProvider.notifier).removePodcast(pod.rssUrl);
                           },
@@ -233,6 +349,7 @@ class PodcastCatalogView extends ConsumerWidget {
           ),
         ],
       ),
+    ),
     );
   }
 
@@ -333,7 +450,7 @@ class PodcastCatalogView extends ConsumerWidget {
           },
         );
       },
-    );
+    ).then((_) => controller.dispose());
   }
 
   Future<void> _exportOpml(BuildContext context, WidgetRef ref) async {

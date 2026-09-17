@@ -18,6 +18,7 @@ class SyncService {
   String? lastError;
   List<String> lastFeedWarnings = [];
   bool _isPushingActions = false;
+  bool _needsRepush = false;
 
   SyncService({
     GPodderApiClient? apiClient,
@@ -33,6 +34,7 @@ class SyncService {
   Future<bool> performFullSync({
     SyncProgressCallback? onProgress,
     bool forceFullResync = false,
+    bool requireGpodder = false,
   }) async {
     lastError = null;
     lastFeedWarnings = [];
@@ -41,11 +43,19 @@ class SyncService {
     final username = await _storage.read(SecureStorageService.keyUsername);
     final password = await _storage.read(SecureStorageService.keyPassword);
 
-    if (serverUrl == null || serverUrl.isEmpty ||
-        username == null || username.isEmpty ||
-        password == null || password.isEmpty) {
-      lastError = 'Server credentials not configured. Please enter server URL, username, and password in Settings.';
-      return false;
+    final isGpodderConfigured = serverUrl != null && serverUrl.trim().isNotEmpty &&
+        username != null && username.trim().isNotEmpty &&
+        password != null && password.trim().isNotEmpty;
+
+    if (!isGpodderConfigured) {
+      if (requireGpodder || forceFullResync) {
+        lastError = 'Server credentials not configured. Please enter server URL, username, and password in Settings.';
+        return false;
+      }
+      // Local-only mode: refresh local podcast feeds directly without requiring gPodder
+      onProgress?.call(SyncStage.fetchingFeed, 'Refreshing local subscriptions...');
+      await _refreshLocalPodcastsDirectly(onProgress, isLocalOnlyMode: true);
+      return true;
     }
 
     onProgress?.call(SyncStage.connectingGpodder, 'Pinging gPodder service...');
@@ -256,19 +266,23 @@ class SyncService {
     } catch (e) {
       lastError = AppErrorFormatter.format(e);
       await _refreshLocalPodcastsDirectly(onProgress);
-      return true;
+      return false;
     }
   }
 
   /// Refreshes all locally stored podcasts directly via RSS feeds in parallel
-  Future<void> _refreshLocalPodcastsDirectly(SyncProgressCallback? onProgress) async {
+  Future<void> _refreshLocalPodcastsDirectly(SyncProgressCallback? onProgress, {bool isLocalOnlyMode = false}) async {
     final localPodcasts = await _db.getAllPodcasts();
     if (localPodcasts.isEmpty) {
-      lastFeedWarnings.add('gPodder server is offline and no local podcasts are stored.');
+      if (!isLocalOnlyMode) {
+        lastFeedWarnings.add('gPodder server is offline and no local podcasts are stored.');
+      }
       return;
     }
 
-    lastFeedWarnings.add('gPodder server is offline. Refreshed ${localPodcasts.length} local subscription feeds directly via RSS.');
+    if (!isLocalOnlyMode) {
+      lastFeedWarnings.add('gPodder server is offline. Refreshed ${localPodcasts.length} local subscription feeds directly via RSS.');
+    }
 
     int refreshedCount = 0;
     final totalToRefresh = localPodcasts.length;
@@ -283,7 +297,10 @@ class SyncService {
         } catch (e) {
           final errStr = AppErrorFormatter.format(e);
           lastFeedWarnings.add('${pod.title} (${pod.rssUrl}): $errStr');
-          await _db.markPodcastDead(pod.rssUrl, errStr);
+          final errLower = errStr.toLowerCase();
+          if (!errLower.contains('database') && !errLower.contains('sqlite') && !errLower.contains('locked')) {
+            await _db.markPodcastDead(pod.rssUrl, errStr);
+          }
         } finally {
           refreshedCount++;
           onProgress?.call(
@@ -299,7 +316,7 @@ class SyncService {
   Future<void> _processInParallel<T>({
     required List<T> items,
     required Future<void> Function(T item) worker,
-    int concurrency = 6,
+    int concurrency = 4,
   }) async {
     if (items.isEmpty) return;
     int index = 0;
@@ -385,27 +402,36 @@ class SyncService {
 
   /// Pushes enqueued offline actions to server after collapsing duplicates
   Future<bool> _pushPendingActions(String serverUrl, String username, String password) async {
-    if (_isPushingActions) return true;
+    if (_isPushingActions) {
+      _needsRepush = true;
+      return true;
+    }
     _isPushingActions = true;
     try {
-      final pending = await _db.getPendingActions();
-      if (pending.isEmpty) return true;
+      while (true) {
+        _needsRepush = false;
+        final pending = await _db.getPendingActions();
+        if (pending.isEmpty) break;
 
-      final collapsed = _db.collapseActions(pending);
-      final success = await _apiClient.uploadEpisodeActions(
-        serverUrl: serverUrl,
-        username: username,
-        password: password,
-        actions: collapsed,
-      );
+        final collapsed = _db.collapseActions(pending);
+        final success = await _apiClient.uploadEpisodeActions(
+          serverUrl: serverUrl,
+          username: username,
+          password: password,
+          actions: collapsed,
+        );
 
-      if (success) {
-        final ids = pending.map((a) => a.id!).where((id) => id > 0).toList();
-        await _db.markActionsSynced(ids);
-      } else {
-        lastError = _apiClient.lastError ?? 'Failed to upload episode actions.';
+        if (success) {
+          final ids = pending.map((a) => a.id!).where((id) => id > 0).toList();
+          await _db.markActionsSynced(ids);
+        } else {
+          lastError = _apiClient.lastError ?? 'Failed to upload episode actions.';
+          return false;
+        }
+
+        if (!_needsRepush) break;
       }
-      return success;
+      return true;
     } finally {
       _isPushingActions = false;
     }
@@ -460,9 +486,10 @@ class SyncService {
 
       await _db.saveEpisodesBatch(episodes);
 
-      // Pre-cache podcast cover and episode image assets on device
-      ImageCacheService.precacheImageUrl(feedResult.imageUrl);
-      ImageCacheService.precacheBatch(episodes.map((e) => e.imageUrl));
+      // Pre-cache podcast cover only (on-demand loading for episode thumbnails prevents UI lag)
+      if (feedResult.imageUrl.isNotEmpty) {
+        ImageCacheService.precacheImageUrl(feedResult.imageUrl);
+      }
 
       return savedPod ?? podcast;
     } catch (e) {

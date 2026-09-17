@@ -185,24 +185,82 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                   ),
                   const SizedBox(height: 16),
                 ],
-                const Text(
-                  'Nextcloud gPodder Server Integration',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Synchronization & Storage',
+                            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _serverController.text.trim().isEmpty
+                                ? 'Standalone / Local Only Mode (No server required)'
+                                : 'Nextcloud gPodder Sync Mode',
+                            style: TextStyle(
+                              color: _serverController.text.trim().isEmpty
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Colors.green,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _serverController.text.trim().isEmpty
+                            ? Theme.of(context).colorScheme.primaryContainer
+                            : Colors.green.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _serverController.text.trim().isEmpty ? Icons.phone_android : Icons.cloud_outlined,
+                            size: 14,
+                            color: _serverController.text.trim().isEmpty
+                                ? Theme.of(context).colorScheme.onPrimaryContainer
+                                : Colors.green[800],
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _serverController.text.trim().isEmpty ? 'Local Mode' : 'gPodder Mode',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: _serverController.text.trim().isEmpty
+                                  ? Theme.of(context).colorScheme.onPrimaryContainer
+                                  : Colors.green[800],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'Synchronize your podcast subscriptions and playback positions across Windows, Android, macOS, and Linux.',
-                  style: TextStyle(color: Colors.grey),
+                Text(
+                  _serverController.text.trim().isEmpty
+                      ? 'You are running in standalone local mode. Subscriptions, downloads, and playback progress are stored securely on your device.'
+                      : 'Synchronize podcast subscriptions and playback positions with your Nextcloud gPodder server across all your devices.',
+                  style: const TextStyle(color: Colors.grey),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
                 TextField(
                   controller: _serverController,
                   decoration: const InputDecoration(
-                    labelText: 'Nextcloud Server URL',
+                    labelText: 'Nextcloud Server URL (Optional for Local Mode)',
                     hintText: 'https://nextcloud.example.com',
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.cloud),
                   ),
+                  onChanged: (_) => setState(() {}),
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -212,6 +270,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.person),
                   ),
+                  onChanged: (_) => setState(() {}),
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -222,6 +281,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.lock),
                   ),
+                  onChanged: (_) => setState(() {}),
                 ),
                 const SizedBox(height: 24),
                 if (_statusMessage != null) ...[
@@ -264,6 +324,8 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                   builder: (context, ref, child) {
                     final syncState = ref.watch(syncStatusNotifierProvider);
                     final isSyncing = syncState.isSyncing;
+                    final isConfigured = _serverController.text.trim().isNotEmpty &&
+                        _userController.text.trim().isNotEmpty;
 
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -279,7 +341,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  syncState.currentTask ?? 'Syncing with gPodder...',
+                                  syncState.currentTask ?? (isConfigured ? 'Syncing with gPodder...' : 'Refreshing local feeds...'),
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ),
@@ -287,15 +349,19 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           ),
                           const SizedBox(height: 12),
                         ],
-                        OutlinedButton.icon(
+                        FilledButton.icon(
                           icon: isSyncing
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                                 )
                               : const Icon(Icons.sync),
-                          label: Text(isSyncing ? 'Syncing...' : 'Sync Now with gPodder'),
+                          label: Text(
+                            isSyncing
+                                ? 'Processing...'
+                                : (isConfigured ? 'Save & Sync with gPodder' : 'Refresh Local Feeds (Local Mode)'),
+                          ),
                           onPressed: isSyncing
                               ? null
                               : () async {
@@ -303,38 +369,62 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                                   ref.read(podcastsNotifierProvider.notifier).refreshAll();
                                 },
                         ),
-                        const SizedBox(height: 8),
-                        TextButton.icon(
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Force Full Re-sync (Retrieve all played positions)'),
-                          onPressed: isSyncing
-                              ? null
-                              : () async {
-                                  await _saveCredentials();
-                                  ref.read(podcastsNotifierProvider.notifier).refreshAll(forceFullResync: true);
-                                },
-                        ),
+                        if (isConfigured) ...[
+                          const SizedBox(height: 8),
+                          TextButton.icon(
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Force Full Re-sync (Retrieve all played positions)'),
+                            onPressed: isSyncing
+                                ? null
+                                : () async {
+                                    await _saveCredentials();
+                                    ref.read(podcastsNotifierProvider.notifier).refreshAll(forceFullResync: true);
+                                  },
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  icon: _isTesting
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.cloud_done),
+                                  label: const Text('Test Connection'),
+                                  onPressed: _isTesting ? null : _testConnection,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  icon: const Icon(Icons.cloud_off, color: Colors.red),
+                                  label: const Text('Use Local Only'),
+                                  onPressed: () async {
+                                    final storage = ref.read(secureStorageProvider);
+                                    await storage.delete(SecureStorageService.keyServerUrl);
+                                    await storage.delete(SecureStorageService.keyUsername);
+                                    await storage.delete(SecureStorageService.keyPassword);
+                                    await storage.delete(SecureStorageService.keyLastSubscriptionTimestamp);
+                                    await storage.delete(SecureStorageService.keyLastActionTimestamp);
+                                    setState(() {
+                                      _serverController.clear();
+                                      _userController.clear();
+                                      _passwordController.clear();
+                                      _statusMessage = 'Switched to standalone Local Mode.';
+                                      _isSuccessStatus = true;
+                                    });
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     );
                   },
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: _isTesting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.cloud_done),
-                        label: const Text('Test Connection'),
-                        onPressed: _isTesting ? null : _testConnection,
-                      ),
-                    ),
-                  ],
                 ),
                 const SizedBox(height: 24),
                 const Divider(),

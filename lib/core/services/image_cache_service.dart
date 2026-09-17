@@ -12,6 +12,7 @@ class ImageCacheService {
   ImageCacheService._();
 
   static Directory? _cacheDir;
+  static Completer<Directory>? _cacheDirCompleter;
   static final Dio _dio = Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 4),
@@ -19,9 +20,13 @@ class ImageCacheService {
     ),
   );
 
+  static bool _cleanedOrphanedTmp = false;
+
   /// Resolves the persistent disk image cache directory in Application Support.
   static Future<Directory> _getCacheDir() async {
     if (_cacheDir != null && await _cacheDir!.exists()) return _cacheDir!;
+    if (_cacheDirCompleter != null) return _cacheDirCompleter!.future;
+    _cacheDirCompleter = Completer<Directory>();
     try {
       final appSupportDir = await getApplicationSupportDirectory();
       final dir = Directory(p.join(appSupportDir.path, 'persistent_image_cache'));
@@ -29,15 +34,34 @@ class ImageCacheService {
         await dir.create(recursive: true);
       }
       _cacheDir = dir;
+      _cacheDirCompleter!.complete(dir);
+      if (!_cleanedOrphanedTmp) {
+        _cleanedOrphanedTmp = true;
+        try {
+          dir.list().listen((entity) {
+            if (entity is File && entity.path.endsWith('.tmp')) {
+              entity.delete().catchError((_) => entity);
+            }
+          });
+        } catch (_) {}
+      }
       return dir;
     } catch (_) {
-      final temp = await getTemporaryDirectory();
-      final dir = Directory(p.join(temp.path, 'persistent_image_cache'));
-      if (!await dir.exists()) {
-        await dir.create(recursive: true);
+      try {
+        final temp = await getTemporaryDirectory();
+        final dir = Directory(p.join(temp.path, 'persistent_image_cache'));
+        if (!await dir.exists()) {
+          await dir.create(recursive: true);
+        }
+        _cacheDir = dir;
+        _cacheDirCompleter!.complete(dir);
+        return dir;
+      } catch (e, st) {
+        _cacheDirCompleter!.completeError(e, st);
+        rethrow;
       }
-      _cacheDir = dir;
-      return dir;
+    } finally {
+      _cacheDirCompleter = null;
     }
   }
 
@@ -87,21 +111,27 @@ class ImageCacheService {
     final cleanUrl = url.trim();
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) return null;
 
-    if (_inFlight.containsKey(cleanUrl)) {
-      return _inFlight[cleanUrl]!;
+    final existingFuture = _inFlight[cleanUrl];
+    if (existingFuture != null) {
+      return existingFuture;
     }
 
-    final existing = await getCachedFile(cleanUrl);
-    if (existing != null) return existing;
+    final completer = Completer<File?>();
+    _inFlight[cleanUrl] = completer.future;
 
-    if (_inFlight.containsKey(cleanUrl)) {
-      return _inFlight[cleanUrl]!;
-    }
-
-    final future = _performDownloadAndCache(cleanUrl);
-    _inFlight[cleanUrl] = future;
     try {
-      return await future;
+      final existing = await getCachedFile(cleanUrl);
+      if (existing != null) {
+        completer.complete(existing);
+        return existing;
+      }
+
+      final downloaded = await _performDownloadAndCache(cleanUrl);
+      completer.complete(downloaded);
+      return downloaded;
+    } catch (e, st) {
+      completer.completeError(e, st);
+      rethrow;
     } finally {
       _inFlight.remove(cleanUrl);
     }

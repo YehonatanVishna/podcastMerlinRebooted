@@ -234,6 +234,33 @@ class DatabaseHelper {
         try {
           await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_guid ON episodes(guid);');
         } catch (_) {}
+        try {
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_podcast_id ON episodes(podcastId);');
+        } catch (_) {}
+        try {
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_pub_date ON episodes(pubDate DESC);');
+        } catch (_) {}
+        try {
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_is_played ON episodes(isPlayed);');
+        } catch (_) {}
+        try {
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_is_starred ON episodes(isStarred);');
+        } catch (_) {}
+        try {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS playback_history (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              episodeId INTEGER NOT NULL,
+              playedAt TEXT NOT NULL,
+              position INTEGER NOT NULL DEFAULT 0,
+              duration INTEGER NOT NULL DEFAULT 0,
+              completed INTEGER NOT NULL DEFAULT 0,
+              FOREIGN KEY (episodeId) REFERENCES episodes (id) ON DELETE CASCADE,
+              UNIQUE (episodeId)
+            )
+          ''');
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_playback_history_played_at ON playback_history(playedAt DESC);');
+        } catch (_) {}
       } catch (_) {}
 
       _columnsDetected = true;
@@ -374,8 +401,26 @@ class DatabaseHelper {
       )
     ''');
 
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS playback_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        episodeId INTEGER NOT NULL,
+        playedAt TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        duration INTEGER NOT NULL DEFAULT 0,
+        completed INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (episodeId) REFERENCES episodes (id) ON DELETE CASCADE,
+        UNIQUE (episodeId)
+      )
+    ''');
+
     await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_media_url ON episodes (mediaUrl);');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_guid ON episodes (guid);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_podcast_id ON episodes (podcastId);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_pub_date ON episodes (pubDate DESC);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_is_played ON episodes (isPlayed);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_episodes_is_starred ON episodes (isStarred);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_playback_history_played_at ON playback_history (playedAt DESC);');
   }
 
   // PODCAST CRUD OPERATIONS
@@ -1108,6 +1153,128 @@ class DatabaseHelper {
   Future<int> updateEpisodePlaybackState(String mediaUrl, int position, {bool isPlayed = false}) async =>
       updateEpisodeProgress(mediaUrl, position, isPlayed);
 
+  Future<void> setEpisodePlayed(int episodeId, bool isPlayed, {int? position}) async {
+    final db = await instance.database;
+    await _detectColumnNames(db);
+    final ep = await getEpisodeById(episodeId);
+    if (ep == null) return;
+
+    final newPos = position ?? (isPlayed ? (ep.duration > 0 ? ep.duration : ep.position) : 0);
+    await db.update(
+      'episodes',
+      {
+        _isPlayedCol: isPlayed ? 1 : 0,
+        'position': newPos,
+      },
+      where: 'id = ?',
+      whereArgs: [episodeId],
+    );
+
+    if (isPlayed) {
+      await recordPlaybackHistory(
+        episodeId,
+        position: newPos,
+        duration: ep.duration,
+        completed: true,
+      );
+    } else {
+      await removeEpisodeFromHistory(episodeId);
+    }
+  }
+
+  Future<void> markMultipleEpisodesPlayed(List<int> episodeIds, bool isPlayed) async {
+    if (episodeIds.isEmpty) return;
+    final db = await instance.database;
+    await _detectColumnNames(db);
+    final batch = db.batch();
+    for (final id in episodeIds) {
+      if (isPlayed) {
+        batch.rawUpdate(
+          'UPDATE episodes SET $_isPlayedCol = 1, position = CASE WHEN duration > 0 THEN duration ELSE position END WHERE id = ?',
+          [id],
+        );
+        batch.rawInsert('''
+          INSERT INTO playback_history (episodeId, playedAt, position, duration, completed)
+          VALUES (?, ?, (SELECT duration FROM episodes WHERE id = ?), (SELECT duration FROM episodes WHERE id = ?), 1)
+          ON CONFLICT(episodeId) DO UPDATE SET
+            playedAt = excluded.playedAt,
+            position = excluded.position,
+            duration = CASE WHEN excluded.duration > 0 THEN excluded.duration ELSE duration END,
+            completed = 1
+        ''', [id, DateTime.now().toIso8601String(), id, id]);
+      } else {
+        batch.rawUpdate(
+          'UPDATE episodes SET $_isPlayedCol = 0, position = 0 WHERE id = ?',
+          [id],
+        );
+        batch.delete(
+          'playback_history',
+          where: 'episodeId = ?',
+          whereArgs: [id],
+        );
+      }
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> recordPlaybackHistory(
+    int episodeId, {
+    int? position,
+    int? duration,
+    bool? completed,
+    DateTime? playedAt,
+  }) async {
+    try {
+      final db = await instance.database;
+      await _detectColumnNames(db);
+      final now = (playedAt ?? DateTime.now()).toIso8601String();
+      await db.rawInsert('''
+        INSERT INTO playback_history (episodeId, playedAt, position, duration, completed)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(episodeId) DO UPDATE SET
+          playedAt = excluded.playedAt,
+          position = excluded.position,
+          duration = CASE WHEN excluded.duration > 0 THEN excluded.duration ELSE duration END,
+          completed = excluded.completed
+      ''', [
+        episodeId,
+        now,
+        position ?? 0,
+        duration ?? 0,
+        completed == true ? 1 : 0,
+      ]);
+    } catch (_) {}
+  }
+
+  Future<List<Episode>> getPlaybackHistory({int limit = 100, int offset = 0}) async {
+    final db = await instance.database;
+    await _detectColumnNames(db);
+
+    final query = '''
+      SELECT e.*, p.$_podcastRssUrlCol AS podcastRss, h.playedAt AS historyPlayedAt
+      FROM playback_history h
+      JOIN episodes e ON h.episodeId = e.id
+      LEFT JOIN podcasts p ON e.$_podcastIdCol = p.id
+      ORDER BY h.playedAt DESC
+      LIMIT ? OFFSET ?
+    ''';
+
+    final maps = await db.rawQuery(query, [limit, offset]);
+    return maps.map((m) => Episode.fromMap(m)).toList();
+  }
+
+  Future<int> removeEpisodeFromHistory(int episodeId) async {
+    final db = await instance.database;
+    await _detectColumnNames(db);
+    return db.delete('playback_history', where: 'episodeId = ?', whereArgs: [episodeId]);
+  }
+
+  Future<int> clearPlaybackHistory() async {
+    final db = await instance.database;
+    await _detectColumnNames(db);
+    return db.delete('playback_history');
+  }
+
   /// Apply a batch of remote episode actions to local episodes with intelligent
   /// matching (by GUID, exact URL, and normalized URL), chronological ordering,
   /// and robust played state detection using episode duration from SQLite.
@@ -1481,6 +1648,28 @@ class DatabaseHelper {
   }
 
   Future<int> enqueueAction(GPodderAction action) async => queueGPodderAction(action);
+
+  Future<void> enqueueActionsBatch(List<GPodderAction> actions) async {
+    if (actions.isEmpty) return;
+    final db = await instance.database;
+    final batch = db.batch();
+    for (final action in actions) {
+      final map = action.toMap();
+      final adapted = <String, dynamic>{
+        'podcast': map['podcast'] ?? '',
+        'episode': map['episode'] ?? '',
+        'device': map['device'] ?? '',
+        'action': map['action'] ?? '',
+        'timestamp': map['timestamp'] ?? DateTime.now().toIso8601String(),
+        'started': map['started'] ?? 0,
+        'position': map['position'] ?? 0,
+        'total': map['total'] ?? 0,
+        'guid': map['guid'] ?? '',
+      };
+      batch.insert('gpodder_actions', adapted);
+    }
+    await batch.commit(noResult: true);
+  }
 
   Future<List<GPodderAction>> getQueuedGPodderActions() async {
     final db = await instance.database;

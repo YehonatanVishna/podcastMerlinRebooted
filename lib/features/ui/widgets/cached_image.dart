@@ -122,17 +122,22 @@ class _AppCachedImageState extends State<AppCachedImage> {
     }
   }
 
+  int? get _cacheWidth => (widget.width != null && widget.width!.isFinite && widget.width! > 0)
+      ? (widget.width! * 2).round()
+      : null;
+  int? get _cacheHeight => (widget.height != null && widget.height!.isFinite && widget.height! > 0)
+      ? (widget.height! * 2).round()
+      : null;
+
   @override
   Widget build(BuildContext context) {
     final fallback = widget.errorWidget ??
         Container(
           width: widget.width,
           height: widget.height,
-          color: Theme.of(context).colorScheme.primaryContainer,
-          child: Icon(
-            Icons.podcasts,
-            size: (widget.width != null && widget.width! < 60) ? 24 : 40,
-            color: Theme.of(context).colorScheme.onPrimaryContainer,
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          child: const Center(
+            child: Icon(Icons.podcasts, size: 28, color: Colors.grey),
           ),
         );
 
@@ -149,15 +154,13 @@ class _AppCachedImageState extends State<AppCachedImage> {
             ? Uri.parse(cleanUrl).toFilePath()
             : cleanUrl;
         final file = _localFile ?? File(filePath);
-        final int? cacheW = widget.width != null ? (widget.width! * 2).round() : null;
-        final int? cacheH = widget.height != null ? (widget.height! * 2).round() : null;
         if (file.existsSync()) {
           Widget content = Image.file(
             file,
             width: widget.width,
             height: widget.height,
-            cacheWidth: cacheW,
-            cacheHeight: cacheH,
+            cacheWidth: _cacheWidth,
+            cacheHeight: _cacheHeight,
             fit: widget.fit,
             errorBuilder: (context, error, stackTrace) => fallback,
           );
@@ -209,14 +212,12 @@ class _AppCachedImageState extends State<AppCachedImage> {
         errorBuilder: (context, error, stackTrace) => fallback,
       );
     } else if (_localFile != null) {
-      final int? cacheW = widget.width != null ? (widget.width! * 2).round() : null;
-      final int? cacheH = widget.height != null ? (widget.height! * 2).round() : null;
       content = Image.file(
         _localFile!,
         width: widget.width,
         height: widget.height,
-        cacheWidth: cacheW,
-        cacheHeight: cacheH,
+        cacheWidth: _cacheWidth,
+        cacheHeight: _cacheHeight,
         fit: widget.fit,
         errorBuilder: (context, error, stackTrace) => fallback,
       );
@@ -239,6 +240,8 @@ class _AppCachedImageState extends State<AppCachedImage> {
         cleanUrl,
         width: widget.width,
         height: widget.height,
+        cacheWidth: _cacheWidth,
+        cacheHeight: _cacheHeight,
         fit: widget.fit,
         errorBuilder: (context, error, stackTrace) => fallback,
       );
