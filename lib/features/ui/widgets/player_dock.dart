@@ -37,6 +37,9 @@ class PlayerDock extends ConsumerWidget {
           builder: (context, playbackSnapshot) {
             final state = playbackSnapshot.data;
             final isPlaying = state?.playing ?? false;
+            final isBuffering = isPlaying &&
+                (state?.processingState == AudioProcessingState.buffering ||
+                    state?.processingState == AudioProcessingState.loading);
             final position = state?.position ?? Duration.zero;
 
             final maxSeconds = totalDuration.inSeconds > 0 ? totalDuration.inSeconds : 1;
@@ -57,6 +60,7 @@ class PlayerDock extends ConsumerWidget {
                     totalDuration: totalDuration,
                     progress: progressVal,
                     isPlaying: isPlaying,
+                    isBuffering: isBuffering,
                   );
                 }
 
@@ -70,6 +74,7 @@ class PlayerDock extends ConsumerWidget {
                   maxSeconds: maxSeconds,
                   clampedSec: clampedSec,
                   isPlaying: isPlaying,
+                  isBuffering: isBuffering,
                 );
               },
             );
@@ -88,15 +93,22 @@ class PlayerDock extends ConsumerWidget {
     required Duration totalDuration,
     required double progress,
     required bool isPlaying,
+    required bool isBuffering,
   }) {
     final theme = Theme.of(context);
 
-    return Material(
-      color: theme.colorScheme.surface,
-      elevation: 4,
-      child: InkWell(
-        onTap: () => NowPlayingSheet.show(context),
-        child: Container(
+    return _MiniPlayerGestureWrapper(
+      onSwipeUp: () {
+        if (context.mounted) {
+          NowPlayingSheet.show(context);
+        }
+      },
+      child: Material(
+        color: theme.colorScheme.surface,
+        elevation: 4,
+        child: InkWell(
+          onTap: () => NowPlayingSheet.show(context),
+          child: Container(
           width: double.infinity,
           decoration: BoxDecoration(
             border: Border(
@@ -110,7 +122,7 @@ class PlayerDock extends ConsumerWidget {
             children: [
               // Slim progress bar at the very top of mini player
               LinearProgressIndicator(
-                value: progress,
+                value: isBuffering ? null : progress,
                 minHeight: 2.5,
                 backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
                 valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
@@ -144,7 +156,9 @@ class PlayerDock extends ConsumerWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '${_formatDuration(position)} / ${_formatDuration(totalDuration)}',
+                            isBuffering
+                                ? 'Buffering... • ${_formatDuration(position)} / ${_formatDuration(totalDuration)}'
+                                : '${_formatDuration(position)} / ${_formatDuration(totalDuration)}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
@@ -158,11 +172,21 @@ class PlayerDock extends ConsumerWidget {
                     // Play / Pause Button
                     IconButton(
                       constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                      icon: Icon(
-                        isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                        size: 36,
-                        color: theme.colorScheme.primary,
-                      ),
+                      tooltip: isBuffering ? 'Buffering...' : (isPlaying ? 'Pause' : 'Play'),
+                      icon: isBuffering
+                          ? SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: theme.colorScheme.primary,
+                              ),
+                            )
+                          : Icon(
+                              isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                              size: 36,
+                              color: theme.colorScheme.primary,
+                            ),
                       onPressed: () {
                         if (isPlaying) {
                           audioHandler.pause();
@@ -203,8 +227,9 @@ class PlayerDock extends ConsumerWidget {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildDesktopPlayerDock(
     BuildContext context, {
@@ -216,6 +241,7 @@ class PlayerDock extends ConsumerWidget {
     required int maxSeconds,
     required double clampedSec,
     required bool isPlaying,
+    required bool isBuffering,
   }) {
     final theme = Theme.of(context);
 
@@ -286,7 +312,9 @@ class PlayerDock extends ConsumerWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${_formatDuration(position)} / ${_formatDuration(totalDuration)}',
+                      isBuffering
+                          ? 'Buffering... • ${_formatDuration(position)} / ${_formatDuration(totalDuration)}'
+                          : '${_formatDuration(position)} / ${_formatDuration(totalDuration)}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.7),
                       ),
@@ -314,11 +342,21 @@ class PlayerDock extends ConsumerWidget {
               // Play / Pause
               IconButton(
                 visualDensity: VisualDensity.compact,
-                icon: Icon(
-                  isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                  size: 38,
-                  color: theme.colorScheme.primary,
-                ),
+                tooltip: isBuffering ? 'Buffering...' : (isPlaying ? 'Pause' : 'Play'),
+                icon: isBuffering
+                    ? SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: theme.colorScheme.primary,
+                        ),
+                      )
+                    : Icon(
+                        isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                        size: 38,
+                        color: theme.colorScheme.primary,
+                      ),
                 onPressed: () {
                   if (isPlaying) {
                     audioHandler.pause();
@@ -456,5 +494,51 @@ class PlayerDock extends ConsumerWidget {
       return '${d.inHours}:$minutes:$seconds';
     }
     return '$minutes:$seconds';
+  }
+}
+
+/// Handles vertical drag gestures (swipe up) on the mobile compact mini-player
+/// while ensuring tap events on buttons and the bar continue without interference.
+class _MiniPlayerGestureWrapper extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onSwipeUp;
+
+  const _MiniPlayerGestureWrapper({
+    required this.child,
+    required this.onSwipeUp,
+  });
+
+  @override
+  State<_MiniPlayerGestureWrapper> createState() => _MiniPlayerGestureWrapperState();
+}
+
+class _MiniPlayerGestureWrapperState extends State<_MiniPlayerGestureWrapper> {
+  double _verticalDelta = 0.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onVerticalDragStart: (_) {
+        _verticalDelta = 0.0;
+      },
+      onVerticalDragUpdate: (details) {
+        _verticalDelta += details.delta.dy;
+      },
+      onVerticalDragEnd: (details) {
+        final velocity = details.primaryVelocity ?? 0.0;
+        // In Flutter coordinates, upward movement results in negative dy/velocity.
+        final isFlingUp = velocity < -150;
+        final isDragUp = velocity <= 50 && _verticalDelta < -40;
+        if (isFlingUp || isDragUp) {
+          widget.onSwipeUp();
+        }
+        _verticalDelta = 0.0;
+      },
+      onVerticalDragCancel: () {
+        _verticalDelta = 0.0;
+      },
+      child: widget.child,
+    );
   }
 }

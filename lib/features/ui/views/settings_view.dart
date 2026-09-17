@@ -179,6 +179,8 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 const SizedBox(height: 24),
                 if (syncStatus.error != null && !syncStatus.isSyncing) ...[
                   SyncErrorBanner(
+                    title: 'Sync Failed',
+                    summary: 'Some sync tasks failed',
                     errorMessage: syncStatus.error!,
                     onDismiss: () => ref.read(syncStatusNotifierProvider.notifier).clearError(),
                     onRetry: () => ref.read(podcastsNotifierProvider.notifier).refreshAll(),

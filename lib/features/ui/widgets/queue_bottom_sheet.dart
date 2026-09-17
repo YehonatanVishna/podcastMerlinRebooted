@@ -193,6 +193,7 @@ class QueueBottomSheet extends ConsumerWidget {
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
                           itemCount: queue.length,
+                          // ignore: deprecated_member_use
                           onReorder: (oldIndex, newIndex) {
                             if (oldIndex < newIndex) {
                               newIndex -= 1;

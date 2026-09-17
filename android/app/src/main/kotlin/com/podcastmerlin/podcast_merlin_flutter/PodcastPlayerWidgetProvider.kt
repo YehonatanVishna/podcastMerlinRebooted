@@ -16,6 +16,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Build
 import android.view.KeyEvent
+import android.view.View
 import android.widget.RemoteViews
 import es.antonborri.home_widget.HomeWidgetLaunchIntent
 import es.antonborri.home_widget.HomeWidgetProvider
@@ -39,16 +40,24 @@ class PodcastPlayerWidgetProvider : HomeWidgetProvider() {
 
                 // Track title & podcast subtitle
                 val title = widgetData.getString("widget_title", null) ?: "Podcast Merlin"
-                val subtitle = widgetData.getString("widget_podcast", null) ?: "Tap to open player"
+                val podcastSubtitle = widgetData.getString("widget_podcast", null) ?: "Tap to open player"
+                val isBuffering = widgetData.getBoolean("widget_is_buffering", false)
+                val subtitle = if (isBuffering) "Buffering..." else podcastSubtitle
                 setTextViewText(R.id.widget_title, title)
                 setTextViewText(R.id.widget_subtitle, subtitle)
 
-                // Playback status (isPlaying)
+                // Playback status (isPlaying & isBuffering)
                 val isPlaying = widgetData.getBoolean("widget_is_playing", false)
-                setImageViewResource(
-                    R.id.widget_btn_play_pause,
-                    if (isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play
-                )
+                if (isBuffering) {
+                    setViewVisibility(R.id.widget_buffering_spinner, View.VISIBLE)
+                    setImageViewResource(R.id.widget_btn_play_pause, 0)
+                } else {
+                    setViewVisibility(R.id.widget_buffering_spinner, View.GONE)
+                    setImageViewResource(
+                        R.id.widget_btn_play_pause,
+                        if (isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play
+                    )
+                }
 
                 // Progress (0 to 100)
                 val progress = widgetData.getInt("widget_progress", 0)
@@ -77,10 +86,9 @@ class PodcastPlayerWidgetProvider : HomeWidgetProvider() {
                 }
 
                 // Action buttons: MediaButton PendingIntents to AudioService MediaButtonReceiver
-                setOnClickPendingIntent(
-                    R.id.widget_btn_play_pause,
-                    createMediaButtonIntent(context, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 201)
-                )
+                val playPauseIntent = createMediaButtonIntent(context, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 201)
+                setOnClickPendingIntent(R.id.widget_btn_play_pause, playPauseIntent)
+                setOnClickPendingIntent(R.id.widget_buffering_spinner, playPauseIntent)
                 setOnClickPendingIntent(
                     R.id.widget_btn_rewind,
                     createMediaButtonIntent(context, KeyEvent.KEYCODE_MEDIA_REWIND, 202)

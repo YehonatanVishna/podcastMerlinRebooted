@@ -35,6 +35,13 @@ class PodcastWidgetService {
     _playbackSub = audioHandler.playbackState.listen((state) {
       final oldState = _lastState;
       final playingChanged = oldState?.playing != state.playing;
+      final isBuffering = state.playing &&
+          (state.processingState == AudioProcessingState.buffering ||
+              state.processingState == AudioProcessingState.loading);
+      final oldBuffering = (oldState?.playing ?? false) &&
+          (oldState?.processingState == AudioProcessingState.buffering ||
+              oldState?.processingState == AudioProcessingState.loading);
+      final bufferingChanged = oldBuffering != isBuffering;
 
       final now = DateTime.now();
       // Throttle continuous position updates during active playback to prevent excessive IPC
@@ -48,7 +55,7 @@ class PodcastWidgetService {
       final deviation = ((state.position.inSeconds) - expectedPos).abs();
       final positionJumped = deviation > 3;
 
-      if (playingChanged || isPlayingProgressTick || positionJumped || _lastState == null) {
+      if (playingChanged || bufferingChanged || isPlayingProgressTick || positionJumped || _lastState == null) {
         _lastState = state;
         _lastPositionUpdate = now;
         if (_lastItem != null) {
@@ -84,6 +91,7 @@ class PodcastWidgetService {
         HomeWidget.saveWidgetData<String>('widget_title', 'Podcast Merlin'),
         HomeWidget.saveWidgetData<String>('widget_podcast', 'No episode playing'),
         HomeWidget.saveWidgetData<bool>('widget_is_playing', false),
+        HomeWidget.saveWidgetData<bool>('widget_is_buffering', false),
         HomeWidget.saveWidgetData<int>('widget_progress', 0),
         HomeWidget.saveWidgetData<String?>('widget_artwork_path', null),
       ]);
@@ -130,6 +138,9 @@ class PodcastWidgetService {
       final title = item?.title ?? 'Podcast Merlin';
       final podcast = item?.artist ?? item?.album ?? 'No episode playing';
       final isPlaying = state?.playing ?? false;
+      final isBuffering = isPlaying &&
+          (state?.processingState == AudioProcessingState.buffering ||
+              state?.processingState == AudioProcessingState.loading);
 
       final positionSec = state?.position.inSeconds ?? 0;
       final durationSec = item?.duration?.inSeconds ?? 0;
@@ -164,6 +175,7 @@ class PodcastWidgetService {
         HomeWidget.saveWidgetData<String>('widget_title', title),
         HomeWidget.saveWidgetData<String>('widget_podcast', podcast),
         HomeWidget.saveWidgetData<bool>('widget_is_playing', isPlaying),
+        HomeWidget.saveWidgetData<bool>('widget_is_buffering', isBuffering),
         HomeWidget.saveWidgetData<int>('widget_progress', progress),
         HomeWidget.saveWidgetData<String?>('widget_artwork_path', artworkPath),
       ]);

@@ -14,17 +14,28 @@ import 'sleep_timer_bottom_sheet.dart';
 class NowPlayingSheet extends ConsumerStatefulWidget {
   const NowPlayingSheet({super.key});
 
-  static Future<void> show(BuildContext context) {
-    return showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (_) => const NowPlayingSheet(),
-    );
+  static bool _isShowing = false;
+
+  @visibleForTesting
+  static set isShowingForTesting(bool value) => _isShowing = value;
+
+  static Future<void> show(BuildContext context) async {
+    if (_isShowing) return;
+    _isShowing = true;
+    try {
+      await showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (_) => const NowPlayingSheet(),
+      );
+    } finally {
+      _isShowing = false;
+    }
   }
 
   @override
@@ -108,6 +119,9 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
           builder: (context, playbackSnapshot) {
             final state = playbackSnapshot.data;
             final isPlaying = state?.playing ?? false;
+            final isBuffering = isPlaying &&
+                (state?.processingState == AudioProcessingState.buffering ||
+                    state?.processingState == AudioProcessingState.loading);
             final position = state?.position ?? Duration.zero;
 
             final maxSeconds = totalDuration.inSeconds > 0 ? totalDuration.inSeconds : 1;
@@ -269,7 +283,35 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
                               );
                             },
                           ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 4),
+                          SizedBox(
+                            height: 20,
+                            child: isBuffering
+                                ? Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      SizedBox(
+                                        width: 12,
+                                        height: 12,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: theme.colorScheme.primary,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Buffering audio...',
+                                        style: theme.textTheme.bodySmall?.copyWith(
+                                          color: theme.colorScheme.primary,
+                                          fontWeight: FontWeight.w500,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : const SizedBox.shrink(),
+                          ),
+                          const SizedBox(height: 8),
                           // Primary Playback Controls
                           StreamBuilder<({int rewind, int fastForward})>(
                             stream: audioHandler.seekDurationsStream,
@@ -295,10 +337,20 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
                                   IconButton(
                                     constraints: const BoxConstraints(minWidth: 64, minHeight: 64),
                                     iconSize: 64,
-                                    icon: Icon(
-                                      isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                                      color: theme.colorScheme.primary,
-                                    ),
+                                    tooltip: isBuffering ? 'Buffering...' : (isPlaying ? 'Pause' : 'Play'),
+                                    icon: isBuffering
+                                        ? SizedBox(
+                                            width: 48,
+                                            height: 48,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 4,
+                                              color: theme.colorScheme.primary,
+                                            ),
+                                          )
+                                        : Icon(
+                                            isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                                            color: theme.colorScheme.primary,
+                                          ),
                                     onPressed: () {
                                       if (isPlaying) {
                                         audioHandler.pause();
