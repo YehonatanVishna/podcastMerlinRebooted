@@ -229,7 +229,7 @@ void main() {
       expect(find.byType(NowPlayingSheet), findsOneWidget);
     });
 
-    testWidgets('normal tap on expand button still opens NowPlayingSheet', (tester) async {
+    testWidgets('normal tap on mini-player body opens NowPlayingSheet', (tester) async {
       tester.view.physicalSize = const Size(360, 640);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -239,8 +239,8 @@ void main() {
 
       expect(find.byType(NowPlayingSheet), findsNothing);
 
-      // Tap on expand button
-      await tester.tap(find.byIcon(Icons.keyboard_arrow_up));
+      // Tap on mini player progress bar / body
+      await tester.tap(find.byType(LinearProgressIndicator));
       await tester.pumpAndSettle();
 
       expect(find.byType(NowPlayingSheet), findsOneWidget);

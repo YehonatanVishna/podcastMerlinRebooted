@@ -12,6 +12,15 @@ class ResponsiveBreakpoints {
 
   /// Width threshold for switching between bottom navigation and navigation rail
   static const double desktopNavRail = 768.0;
+
+  /// Standard desktop breakpoint (laptops, medium windows)
+  static const double desktop = 1200.0;
+
+  /// Large desktop breakpoint (1080p full screen, 1440p standard)
+  static const double large = 1600.0;
+
+  /// Ultrawide desktop breakpoint (2560px, 3440px+, 4K)
+  static const double ultrawide = 2200.0;
 }
 
 /// Convenience extension on BuildContext to query device sizing and breakpoints.
@@ -35,8 +44,24 @@ extension ResponsiveContext on BuildContext {
   /// Returns true if the width is 900px or greater (desktop, large tablet landscape).
   bool get isExpanded => screenWidth >= ResponsiveBreakpoints.medium;
 
+  /// Returns true if the width is 1200px or greater (standard desktop).
+  bool get isDesktop => screenWidth >= ResponsiveBreakpoints.desktop;
+
+  /// Returns true if the width is 1600px or greater (large desktop).
+  bool get isLarge => screenWidth >= ResponsiveBreakpoints.large;
+
+  /// Returns true if the width is 2200px or greater (ultrawide monitors).
+  bool get isUltrawide => screenWidth >= ResponsiveBreakpoints.ultrawide;
+
   /// Returns true if the width is 768px or greater, suitable for NavigationRail.
   bool get isDesktopNav => screenWidth >= ResponsiveBreakpoints.desktopNavRail;
+
+  /// Recommended max content width for reading or dashboard forms.
+  double get maxContentWidth {
+    if (isUltrawide) return 1400.0;
+    if (isLarge) return 1100.0;
+    return 800.0;
+  }
 }
 
 /// A widget builder that supplies whether the current layout constraint is compact.

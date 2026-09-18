@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../../core/models/episode.dart';
 import '../../../core/models/podcast.dart';
 import '../../../core/providers/app_providers.dart';
+import '../widgets/bidi_text.dart';
 import '../widgets/cached_image.dart';
 import '../widgets/purified_html_text.dart';
 import '../widgets/sync_error_banner.dart';
@@ -239,6 +240,44 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
                         },
                 ),
                 IconButton(
+                  icon: const Icon(Icons.download_rounded),
+                  tooltip: 'Download Selected',
+                  onPressed: _selectedEpisodeIds.isEmpty
+                      ? null
+                      : () {
+                          final selectedEps = displayedEpisodes
+                              .where((e) =>
+                                  e.id != null &&
+                                  _selectedEpisodeIds.contains(e.id) &&
+                                  !e.isDownloaded &&
+                                  !e.isDownloading)
+                              .toList();
+                          if (selectedEps.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Selected episodes are already downloaded or downloading.'),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                            return;
+                          }
+                          final service = ref.read(episodeDownloadServiceProvider);
+                          for (final ep in selectedEps) {
+                            service.startDownload(ep);
+                          }
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Queued ${selectedEps.length} episodes for download'),
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                          setState(() {
+                            _selectedEpisodeIds.clear();
+                            _isSelectionMode = false;
+                          });
+                        },
+                ),
+                IconButton(
                   icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
                   tooltip: allSelected ? 'Deselect All' : 'Select All',
                   onPressed: () {
@@ -276,31 +315,37 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
                       onPressed: widget.onBackPressed,
                     )
                   : null,
-              title: Text(widget.podcast?.title ?? 'All Episodes'),
+              title: BidiText(
+                widget.podcast?.title ?? 'All Episodes',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
               actions: [
-                IconButton(
-                  icon: const Icon(Icons.history),
-                  tooltip: 'Playback History',
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const PlaybackHistoryView(),
-                      ),
-                    );
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.checklist_rounded),
-                  tooltip: 'Select episodes',
-                  onPressed: displayedEpisodes.isEmpty
-                      ? null
-                      : () {
-                          setState(() {
-                            _isSelectionMode = true;
-                            _selectedEpisodeIds.clear();
-                          });
-                        },
-                ),
+                if (MediaQuery.sizeOf(context).width >= 600) ...[
+                  IconButton(
+                    icon: const Icon(Icons.history),
+                    tooltip: 'Playback History',
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const PlaybackHistoryView(),
+                        ),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.checklist_rounded),
+                    tooltip: 'Select episodes',
+                    onPressed: displayedEpisodes.isEmpty
+                        ? null
+                        : () {
+                            setState(() {
+                              _isSelectionMode = true;
+                              _selectedEpisodeIds.clear();
+                            });
+                          },
+                  ),
+                ],
                 IconButton(
                   icon: syncStatus.isSyncing
                       ? const SizedBox(
@@ -322,6 +367,7 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
                 ),
                 PopupMenuButton<EpisodeFilter>(
                   icon: const Icon(Icons.filter_list),
+                  tooltip: 'Filter episodes',
                   initialValue: _localFilter ?? episodesState.filter,
                   onSelected: (filter) {
                     setState(() => _localFilter = filter);
@@ -335,6 +381,49 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
                     PopupMenuItem(value: EpisodeFilter.finished, child: Text('Finished Only')),
                   ],
                 ),
+                if (MediaQuery.sizeOf(context).width < 600)
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert),
+                    tooltip: 'More actions',
+                    onSelected: (value) {
+                      if (value == 'select') {
+                        if (displayedEpisodes.isNotEmpty) {
+                          setState(() {
+                            _isSelectionMode = true;
+                            _selectedEpisodeIds.clear();
+                          });
+                        }
+                      } else if (value == 'history') {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const PlaybackHistoryView(),
+                          ),
+                        );
+                      }
+                    },
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(
+                        value: 'select',
+                        child: Row(
+                          children: [
+                            Icon(Icons.checklist_rounded, size: 20),
+                            SizedBox(width: 12),
+                            Text('Select Episodes'),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'history',
+                        child: Row(
+                          children: [
+                            Icon(Icons.history, size: 20),
+                            SizedBox(width: 12),
+                            Text('Playback History'),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
               ],
             ),
       body: Column(
@@ -1371,7 +1460,7 @@ class _EpisodeTile extends StatelessWidget {
                       ),
                   ],
                 ),
-          title: Text(
+          title: BidiText(
             episode.title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
@@ -1379,7 +1468,7 @@ class _EpisodeTile extends StatelessWidget {
               fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
               color: isCurrent
                   ? Theme.of(context).colorScheme.primary
-                  : (isFinished ? Theme.of(context).disabledColor : null),
+                  : (isFinished ? Theme.of(context).colorScheme.onSurfaceVariant : null),
             ),
           ),
           subtitle: Column(
@@ -1436,10 +1525,13 @@ class _EpisodeTile extends StatelessWidget {
               ),
               if (showProgress) ...[
                 const SizedBox(height: 4),
-                LinearProgressIndicator(
-                  value: progressPercentage,
-                  minHeight: 4,
-                  borderRadius: BorderRadius.circular(2),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 240),
+                  child: LinearProgressIndicator(
+                    value: progressPercentage,
+                    minHeight: 4,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ],
             ],

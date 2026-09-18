@@ -279,15 +279,15 @@ void main() {
       expect(find.textContaining('Mobile Mini Player'), findsOneWidget);
       // Play/pause button present
       expect(find.byIcon(Icons.pause_circle_filled), findsOneWidget);
-      // Expand arrow present
-      expect(find.byIcon(Icons.keyboard_arrow_up), findsOneWidget);
+      // Forward 30s button present
+      expect(find.byTooltip('Forward 30s'), findsOneWidget);
 
       // Desktop controls (speed, sleep timer) are not crammed on the mini player row
       expect(find.byIcon(Icons.speed), findsNothing);
       expect(find.byIcon(Icons.bedtime_outlined), findsNothing);
 
       // Tap on mini player to open NowPlayingSheet
-      await tester.tap(find.byIcon(Icons.keyboard_arrow_up));
+      await tester.tap(find.textContaining('Mobile Mini Player'));
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
@@ -342,7 +342,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(tester.takeException(), isNull);
-      expect(find.byType(Slider), findsOneWidget);
+      expect(find.byType(Slider), findsAtLeastNWidgets(1));
       expect(find.byIcon(Icons.speed), findsOneWidget);
       expect(find.byIcon(Icons.bedtime_outlined), findsOneWidget);
       expect(find.byIcon(Icons.queue_music), findsOneWidget);
@@ -626,14 +626,6 @@ void main() {
       expect(forwardSize.width, greaterThanOrEqualTo(48.0));
       expect(forwardSize.height, greaterThanOrEqualTo(48.0));
 
-      final expandBtn = find.ancestor(
-        of: find.byIcon(Icons.keyboard_arrow_up),
-        matching: find.byType(IconButton),
-      );
-      final expandSize = tester.getSize(expandBtn);
-      expect(expandSize.width, greaterThanOrEqualTo(48.0));
-      expect(expandSize.height, greaterThanOrEqualTo(48.0));
-
       // Verify full tap area coverage: tapping the title text on mini-player opens NowPlayingSheet
       await tester.tap(find.textContaining('Narrow Phone Mini Player'));
       await tester.pumpAndSettle();
@@ -911,6 +903,61 @@ void main() {
       expect(find.text('NOW PLAYING'), findsOneWidget);
       expect(find.text('UP NEXT (1)'), findsOneWidget);
       expect(find.text('Clear Queue'), findsOneWidget);
+    });
+
+    testWidgets('MainShell with active PlayerDock survives dynamic window resizing (983x720, 803x720, 722x720, 355x720) with zero overflow', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      late MerlinAudioHandler audioHandler;
+      await tester.runAsync(() async {
+        audioHandler = MerlinAudioHandler(db: db, urlLoader: (_) async {});
+        final ep = const Episode(
+          id: 401,
+          podcastId: 40,
+          podcastRss: 'https://example.com/rss.xml',
+          guid: 'ep-resize-test',
+          title: 'Very Long Episode Title That Must Truncate Fluidly While Dragging Window',
+          description: 'Test description',
+          mediaUrl: 'https://example.com/resize.mp3',
+          duration: 3600,
+          position: 1200,
+          imageUrl: '',
+        );
+        await audioHandler.playEpisode(ep);
+      });
+      addTearDown(audioHandler.dispose);
+
+      await tester.pumpWidget(
+        buildAppWithViewport(
+          child: const MainShell(),
+          size: const Size(1280, 800),
+          audioHandler: audioHandler,
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      const resizeSteps = [
+        Size(983, 720),
+        Size(803, 720),
+        Size(722, 720),
+        Size(500, 720),
+        Size(355, 720),
+      ];
+
+      for (final stepSize in resizeSteps) {
+        tester.view.physicalSize = stepSize;
+        await tester.pump(const Duration(milliseconds: 50));
+
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'MainShell + PlayerDock must not throw RenderFlex overflow at ${stepSize.width}x${stepSize.height}',
+        );
+        expect(find.byType(PlayerDock), findsOneWidget);
+      }
     });
   });
 }

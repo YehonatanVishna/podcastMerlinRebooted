@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/podcast.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../sync/opml_ui_helper.dart';
+import '../widgets/bidi_text.dart';
 import '../widgets/cached_image.dart';
 import '../widgets/sync_error_banner.dart';
 
@@ -306,37 +307,27 @@ class _PodcastCatalogViewState extends ConsumerState<PodcastCatalogView> {
                 return LayoutBuilder(
                   builder: (context, constraints) {
                     final width = constraints.maxWidth;
-                    final int crossAxisCount;
-                    final double childAspectRatio;
+                    final isMobile = width < 600;
+                    final padding = isMobile ? 12.0 : 16.0;
+                    final spacing = isMobile ? 12.0 : 16.0;
 
-                    if (width < 340) {
-                      crossAxisCount = 1;
-                      childAspectRatio = 2.2;
-                    } else if (width < 600) {
-                      crossAxisCount = 2;
-                      childAspectRatio = 0.72;
-                    } else if (width < 900) {
-                      crossAxisCount = 3;
-                      childAspectRatio = 0.75;
-                    } else if (width < 1200) {
-                      crossAxisCount = 4;
-                      childAspectRatio = 0.75;
-                    } else {
-                      crossAxisCount = 5;
-                      childAspectRatio = 0.75;
-                    }
-
-                    final padding = width < 600 ? 12.0 : 16.0;
-                    final spacing = width < 600 ? 12.0 : 16.0;
+                    final SliverGridDelegate gridDelegate = isMobile
+                        ? SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: width < 340 ? 1 : 2,
+                            childAspectRatio: width < 340 ? 2.2 : 0.72,
+                            crossAxisSpacing: spacing,
+                            mainAxisSpacing: spacing,
+                          )
+                        : SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: 220.0,
+                            childAspectRatio: 0.76,
+                            crossAxisSpacing: spacing,
+                            mainAxisSpacing: spacing,
+                          );
 
                     return GridView.builder(
                       padding: EdgeInsets.all(padding),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: crossAxisCount,
-                        childAspectRatio: childAspectRatio,
-                        crossAxisSpacing: spacing,
-                        mainAxisSpacing: spacing,
-                      ),
+                      gridDelegate: gridDelegate,
                       itemCount: filteredPodcasts.length,
                       itemBuilder: (context, index) {
                         final pod = filteredPodcasts[index];
@@ -530,25 +521,34 @@ class _PodcastCard extends StatelessWidget {
                       ),
                     ),
                   Positioned(
-                    top: 4,
-                    right: 4,
-                    child: PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert, color: Colors.white),
-                      onSelected: (val) {
-                        if (val == 'delete') onDelete();
-                      },
-                      itemBuilder: (context) => const [
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Row(
-                            children: [
-                              Icon(Icons.delete, color: Colors.red),
-                              SizedBox(width: 8),
-                              Text('Unsubscribe'),
-                            ],
+                    top: 6,
+                    right: 6,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        shape: BoxShape.circle,
+                      ),
+                      child: PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert, color: Colors.white, size: 20),
+                        tooltip: 'Podcast Options',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        onSelected: (val) {
+                          if (val == 'delete') onDelete();
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                                SizedBox(width: 8),
+                                Text('Unsubscribe', style: TextStyle(color: Colors.red)),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -559,7 +559,7 @@ class _PodcastCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  BidiText(
                     podcast.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,

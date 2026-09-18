@@ -227,7 +227,22 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         }
       }
     }
-    await _player.setUrl(ep.mediaUrl, initialPosition: initialPos).timeout(const Duration(seconds: 30));
+    try {
+      await _player.setUrl(ep.mediaUrl, initialPosition: initialPos).timeout(const Duration(seconds: 25));
+    } catch (e) {
+      if (!_playbackErrorController.isClosed) {
+        _playbackErrorController.add('Failed to load audio stream. Check your internet connection.');
+      }
+      rethrow;
+    }
+  }
+
+  double get volume => _player.volume;
+  Stream<double> get volumeStream => _player.volumeStream;
+
+  Future<void> setVolume(double val) async {
+    final clamped = val.clamp(0.0, 1.0);
+    await _player.setVolume(clamped);
   }
 
   Stream<PositionUpdateEvent> get onPositionUpdated => _positionUpdateController.stream;

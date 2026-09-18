@@ -6,6 +6,7 @@ import '../../../core/models/episode.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/utils/responsive.dart';
 import '../../downloads/episode_download_service.dart';
+import '../widgets/bidi_text.dart';
 import '../widgets/cached_image.dart';
 
 enum DownloadSortOption { newest, oldest, largest, smallest, title }
@@ -166,18 +167,6 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
           ],
         ),
         actions: [
-          if (activeCount > 0)
-            IconButton(
-              icon: const Icon(Icons.pause_circle_outline),
-              tooltip: 'Pause All Active Downloads',
-              onPressed: () => downloadService.pauseAll(),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.play_circle_outline),
-              tooltip: 'Resume All Paused Downloads',
-              onPressed: () => downloadService.resumeAll(),
-            ),
           if (failedList.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.replay),
@@ -321,52 +310,69 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
         color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
         border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.storage_outlined, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              '${_formatBytes(storageBytes)} offline storage • $downloadedCount ${downloadedCount == 1 ? 'episode' : 'episodes'}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
-            ),
-          ),
-          if (activeCount > 0) ...[
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 10,
-                    height: 10,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: theme.colorScheme.onPrimaryContainer,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    '$activeCount active',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.onPrimaryContainer,
-                    ),
-                  ),
-                  ],
+          Row(
+            children: [
+              const Icon(Icons.storage_outlined, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '${_formatBytes(storageBytes)} offline storage • $downloadedCount ${downloadedCount == 1 ? 'episode' : 'episodes'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
                 ),
               ),
+              if (activeCount > 0) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 10,
+                        height: 10,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: theme.colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '$activeCount active',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: theme.colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
+          ),
+          if (downloadedCount > 0) ...[
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                value: (storageBytes / (50 * 1024 * 1024 * 1024)).clamp(0.01, 1.0),
+                minHeight: 3,
+                backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
+              ),
+            ),
           ],
-        ),
-      );
+        ],
+      ),
+    );
   }
 
   Widget _buildQueueTab(
@@ -543,7 +549,7 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
 
               return ListTile(
                 leading: leadingWidget,
-                title: Text(
+                title: BidiText(
                   displayTitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -906,33 +912,25 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
                               height: 48,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                      title: Text(
+                      title: BidiText(
                         ep.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
-                      subtitle: Wrap(
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        spacing: 6,
-                        runSpacing: 2,
-                        children: [
-                          if (dateStr.isNotEmpty)
-                            Text(dateStr, style: theme.textTheme.bodySmall),
-                          if (dateStr.isNotEmpty && (durationStr.isNotEmpty || ep.downloadedBytes > 0))
-                            const Text('•', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                          if (durationStr.isNotEmpty)
-                            Text(durationStr, style: theme.textTheme.bodySmall),
-                          if (durationStr.isNotEmpty && ep.downloadedBytes > 0)
-                            const Text('•', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                          Text(
-                            _formatBytes(ep.downloadedBytes),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ],
+                      subtitle: Builder(
+                        builder: (context) {
+                          final parts = <String>[];
+                          if (dateStr.isNotEmpty) parts.add(dateStr);
+                          if (durationStr.isNotEmpty) parts.add(durationStr);
+                          if (ep.downloadedBytes > 0) parts.add(_formatBytes(ep.downloadedBytes));
+                          return Text(
+                            parts.join(' • '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall,
+                          );
+                        },
                       ),
                       trailing: _isSelectionMode
                           ? null
@@ -948,10 +946,43 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
                                   icon: const Icon(Icons.delete_outline, size: 20),
                                   tooltip: 'Delete Download',
                                   onPressed: () async {
-                                    await service.deleteDownload(ep);
-                                    ref.invalidate(downloadStorageUsageBytesProvider);
-                                    ref.invalidate(downloadedEpisodesListProvider);
-                                    ref.invalidate(downloadedEpisodesCountProvider);
+                                    final confirm = await showDialog<bool>(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        title: const Text('Delete Download?'),
+                                        content: Text(
+                                          'Are you sure you want to delete "${ep.title}" (${_formatBytes(ep.downloadedBytes)}) from your device?',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.of(ctx).pop(false),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          FilledButton(
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor: theme.colorScheme.error,
+                                              foregroundColor: theme.colorScheme.onError,
+                                            ),
+                                            onPressed: () => Navigator.of(ctx).pop(true),
+                                            child: const Text('Delete'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (confirm == true && context.mounted) {
+                                      await service.deleteDownload(ep);
+                                      ref.invalidate(downloadStorageUsageBytesProvider);
+                                      ref.invalidate(downloadedEpisodesListProvider);
+                                      ref.invalidate(downloadedEpisodesCountProvider);
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text('Deleted download: ${ep.title}'),
+                                            duration: const Duration(seconds: 2),
+                                          ),
+                                        );
+                                      }
+                                    }
                                   },
                                 ),
                               ],
@@ -1234,7 +1265,7 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
                         height: 48,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                title: Text(
+                title: BidiText(
                   ep.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

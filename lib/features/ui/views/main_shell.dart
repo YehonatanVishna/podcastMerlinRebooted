@@ -246,46 +246,59 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
               ],
             ),
             bottomNavigationBar: !isDesktop
-                ? NavigationBar(
-                    selectedIndex: selectedIndex,
-                    onDestinationSelected: _onDestinationSelected,
-                    destinations: [
-                      const NavigationDestination(
-                        icon: Icon(Icons.podcasts_outlined),
-                        selectedIcon: Icon(Icons.podcasts),
-                        label: 'Catalog',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.playlist_play_outlined),
-                        selectedIcon: Icon(Icons.playlist_play),
-                        label: 'Episodes',
-                      ),
-                      NavigationDestination(
-                        icon: activeCount > 0
-                            ? Badge.count(
-                                count: activeCount,
-                                child: const Icon(Icons.download_outlined),
-                              )
-                            : const Icon(Icons.download_outlined),
-                        selectedIcon: activeCount > 0
-                            ? Badge.count(
-                                count: activeCount,
-                                child: const Icon(Icons.download),
-                              )
-                            : const Icon(Icons.download),
-                        label: 'Downloads',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.explore_outlined),
-                        selectedIcon: Icon(Icons.explore),
-                        label: 'Discover',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.settings_outlined),
-                        selectedIcon: Icon(Icons.settings),
-                        label: 'Settings',
-                      ),
-                    ],
+                ? NavigationBarTheme(
+                    data: NavigationBarThemeData(
+                      height: 64,
+                      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                      labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                        if (states.contains(WidgetState.selected)) {
+                          return const TextStyle(fontSize: 11, fontWeight: FontWeight.bold);
+                        }
+                        return const TextStyle(fontSize: 11);
+                      }),
+                    ),
+                    child: NavigationBar(
+                      height: 64,
+                      selectedIndex: selectedIndex,
+                      onDestinationSelected: _onDestinationSelected,
+                      destinations: [
+                        const NavigationDestination(
+                          icon: Icon(Icons.podcasts_outlined),
+                          selectedIcon: Icon(Icons.podcasts),
+                          label: 'Catalog',
+                        ),
+                        const NavigationDestination(
+                          icon: Icon(Icons.playlist_play_outlined),
+                          selectedIcon: Icon(Icons.playlist_play),
+                          label: 'Episodes',
+                        ),
+                        NavigationDestination(
+                          icon: activeCount > 0
+                              ? Badge.count(
+                                  count: activeCount,
+                                  child: const Icon(Icons.download_outlined),
+                                )
+                              : const Icon(Icons.download_outlined),
+                          selectedIcon: activeCount > 0
+                              ? Badge.count(
+                                  count: activeCount,
+                                  child: const Icon(Icons.download),
+                                )
+                              : const Icon(Icons.download),
+                          label: 'Downloads',
+                        ),
+                        const NavigationDestination(
+                          icon: Icon(Icons.explore_outlined),
+                          selectedIcon: Icon(Icons.explore),
+                          label: 'Discover',
+                        ),
+                        const NavigationDestination(
+                          icon: Icon(Icons.settings_outlined),
+                          selectedIcon: Icon(Icons.settings),
+                          label: 'Settings',
+                        ),
+                      ],
+                    ),
                   )
                 : null,
           ),
