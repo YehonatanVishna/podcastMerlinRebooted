@@ -4,8 +4,11 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sqlite3_flutter_libs/sqlite3_flutter_libs.dart';
 
 String? audioBackendInitError;
+bool _isFfiInitialized = false;
 
 void setupFfi() {
+  if (_isFfiInitialized) return;
+  _isFfiInitialized = true;
   if (Platform.isAndroid) {
     try {
       applyWorkaroundToOpenSqlite3OnOldAndroidVersions();

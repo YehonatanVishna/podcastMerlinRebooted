@@ -67,6 +67,7 @@ class FakeEpisodeDownloadService extends Fake implements EpisodeDownloadService 
     _eventController.add(event);
   }
 
+  @override
   void dispose() {
     _eventController.close();
   }

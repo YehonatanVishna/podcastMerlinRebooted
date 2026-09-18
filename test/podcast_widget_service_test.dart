@@ -223,5 +223,106 @@ void main() {
       service.init(handler);
       expect(() => service.dispose(), returnsNormally);
     });
+
+    test('syncs buffering state when audio enters buffering or loading state', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final service = PodcastWidgetService.instance;
+      final handler = _TestAudioHandler();
+
+      handler.updateItem(const MediaItem(
+        id: 'ep1',
+        title: 'Streaming Episode',
+        artist: 'Podcast Show',
+        duration: Duration(seconds: 120),
+      ));
+      handler.updateState(PlaybackState(
+        playing: true,
+        processingState: AudioProcessingState.ready,
+        updatePosition: const Duration(seconds: 10),
+      ));
+
+      service.init(handler);
+      await Future<void>.delayed(Duration.zero);
+      expect(savedData['widget_is_buffering'], false);
+
+      // Transitions to buffering
+      handler.updateState(PlaybackState(
+        playing: true,
+        processingState: AudioProcessingState.buffering,
+        updatePosition: const Duration(seconds: 10),
+      ));
+      await Future<void>.delayed(Duration.zero);
+      expect(savedData['widget_is_buffering'], true);
+
+      // Transitions to loading
+      handler.updateState(PlaybackState(
+        playing: true,
+        processingState: AudioProcessingState.loading,
+        updatePosition: const Duration(seconds: 10),
+      ));
+      await Future<void>.delayed(Duration.zero);
+      expect(savedData['widget_is_buffering'], true);
+
+      // Transitions back to ready
+      handler.updateState(PlaybackState(
+        playing: true,
+        processingState: AudioProcessingState.ready,
+        updatePosition: const Duration(seconds: 10),
+      ));
+      await Future<void>.delayed(Duration.zero);
+      expect(savedData['widget_is_buffering'], false);
+    });
+
+    test('syncEmpty sets widget_is_buffering to false', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final service = PodcastWidgetService.instance;
+      final handler = _TestAudioHandler();
+
+      handler.updateItem(const MediaItem(
+        id: 'ep1',
+        title: 'Streaming Episode',
+        artist: 'Podcast Show',
+      ));
+      handler.updateState(PlaybackState(
+        playing: true,
+        processingState: AudioProcessingState.buffering,
+      ));
+
+      service.init(handler);
+      await Future<void>.delayed(Duration.zero);
+      expect(savedData['widget_is_buffering'], true);
+
+      await service.syncEmpty();
+      expect(savedData['widget_is_buffering'], false);
+    });
+
+    test('buffering state requires playing=true, sets widget_is_buffering to false when paused', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final service = PodcastWidgetService.instance;
+      final handler = _TestAudioHandler();
+
+      handler.updateItem(const MediaItem(
+        id: 'ep1',
+        title: 'Streaming Episode',
+        artist: 'Podcast Show',
+        duration: Duration(seconds: 120),
+      ));
+      handler.updateState(PlaybackState(
+        playing: true,
+        processingState: AudioProcessingState.buffering,
+      ));
+
+      service.init(handler);
+      await Future<void>.delayed(Duration.zero);
+      expect(savedData['widget_is_buffering'], true);
+
+      // Paused while buffering
+      handler.updateState(PlaybackState(
+        playing: false,
+        processingState: AudioProcessingState.buffering,
+      ));
+      await Future<void>.delayed(Duration.zero);
+      expect(savedData['widget_is_buffering'], false);
+    });
   });
 }

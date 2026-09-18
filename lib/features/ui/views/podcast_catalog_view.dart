@@ -202,12 +202,19 @@ class _PodcastCatalogViewState extends ConsumerState<PodcastCatalogView> {
             ),
           ] else if (syncStatus.error != null) ...[
             SyncErrorBanner(
+              title: 'Sync Failed',
+              summary: 'Some sync tasks failed',
               errorMessage: syncStatus.error!,
               onDismiss: () => ref.read(syncStatusNotifierProvider.notifier).clearError(),
               onRetry: () => ref.read(podcastsNotifierProvider.notifier).refreshAll(),
             ),
           ] else if (syncStatus.hasFeedWarnings) ...[
             SyncErrorBanner(
+              isWarning: true,
+              title: 'Feed Sync Warnings',
+              summary: syncStatus.feedWarnings.length == 1
+                  ? '1 podcast feed failed to sync'
+                  : '${syncStatus.feedWarnings.length} podcast feeds failed to sync',
               errorMessage: 'Sync completed, but dead/failing podcast feed(s) were detected:\n${syncStatus.feedWarnings.join('\n')}',
               onDismiss: () => ref.read(syncStatusNotifierProvider.notifier).clearWarnings(),
               onRetry: () => ref.read(podcastsNotifierProvider.notifier).refreshAll(),

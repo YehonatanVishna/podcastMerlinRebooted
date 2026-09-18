@@ -365,6 +365,8 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
             ),
           ] else if (syncStatus.error != null) ...[
             SyncErrorBanner(
+              title: 'Sync Failed',
+              summary: 'Some sync tasks failed',
               errorMessage: syncStatus.error!,
               onDismiss: () => ref.read(syncStatusNotifierProvider.notifier).clearError(),
               onRetry: () => ref
@@ -374,6 +376,9 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
           ],
           if (widget.podcast != null && (widget.podcast!.isDead || widget.podcast!.lastFeedError != null)) ...[
             SyncErrorBanner(
+              isWarning: true,
+              title: 'Feed Unreachable',
+              summary: 'Feed unreachable: ${widget.podcast!.title.isNotEmpty ? widget.podcast!.title : "RSS feed"}',
               errorMessage: 'Feed unreachable: ${widget.podcast!.lastFeedError ?? "This RSS feed is dead or inaccessible."}',
               onRetry: () => ref
                   .read(episodesNotifierProvider(widget.podcast?.id).notifier)
@@ -382,6 +387,8 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
           ],
           if (episodesState.error != null && episodesState.episodes.isNotEmpty)
             SyncErrorBanner(
+              title: 'Error Loading Episodes',
+              summary: 'Failed to load more episodes',
               errorMessage: episodesState.error!,
               onRetry: () => ref
                   .read(episodesNotifierProvider(widget.podcast?.id).notifier)
