@@ -321,7 +321,10 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   void _initPlayerListeners() {
     _playbackEventSub = _player.playbackEventStream.listen(
       (event) {
-        final playing = _player.playing;
+        final isPreparingOrBuffering = (_preparingSourceCompleter != null ||
+            _player.processingState == ProcessingState.loading ||
+            _player.processingState == ProcessingState.buffering);
+        final playing = _player.playing || (isPreparingOrBuffering && playbackState.value.playing);
         final newState = playbackState.value.copyWith(
           controls: [
             MediaControl.rewind,
@@ -458,9 +461,11 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> playEpisode(Episode episode) async {
+    final int currentRequestId = ++_playRequestId;
     if (_initFuture != null) {
       await _initFuture;
     }
+    if (currentRequestId != _playRequestId) return;
     if (episode.id != null) {
       await removeFromQueue(episode.id!);
     }
@@ -528,9 +533,11 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       }
     }
 
+    if (currentRequestId != _playRequestId) return;
     _currentEpisode = epToPlay;
     _lastSyncedPosition = -1; // Reset stale position marker
     await _db.saveActivePlayback(epToPlay, position: epToPlay.position, isCompleted: false);
+    if (currentRequestId != _playRequestId) return;
 
     // Pre-cache episode artwork asynchronously
     if (epToPlay.imageUrl.isNotEmpty) {
@@ -551,6 +558,8 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         artUri = Uri.tryParse(epToPlay.imageUrl);
       }
     }
+
+    if (currentRequestId != _playRequestId) return;
 
     final newItem = MediaItem(
       id: epToPlay.mediaUrl,
@@ -619,6 +628,13 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       final errorState = playbackState.value.copyWith(
         playing: false,
         processingState: AudioProcessingState.idle,
+        controls: [
+          MediaControl.rewind,
+          MediaControl.play,
+          MediaControl.fastForward,
+          if (_queue.isNotEmpty) MediaControl.skipToNext,
+          MediaControl.stop,
+        ],
       );
       playbackState.add(errorState);
       if (urlLoader == null) {
@@ -630,23 +646,41 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       return;
     }
 
-    final int currentRequestId = ++_playRequestId;
+    final completer = Completer<void>();
+    completer.future.catchError((_) {});
+    _preparingSourceCompleter = completer;
     try {
       await _prepareAudioSource(epToPlay);
-      if (currentRequestId != _playRequestId) return;
-      if (playbackState.value.playing) {
-        await play();
+      if (!completer.isCompleted) {
+        completer.complete();
       }
-      _startPeriodicPositionSync();
-    } on PlayerInterruptedException {
-      // Swallowed on rapid track change
+      if (currentRequestId != _playRequestId) return;
+      if (!playbackState.value.playing) return;
+      await play();
     } catch (e) {
+      if (e is PlayerInterruptedException) {
+        // Swallowed on rapid track change
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+        return;
+      }
+      if (!completer.isCompleted) {
+        completer.completeError(e);
+      }
       if (currentRequestId != _playRequestId) return;
       final errorMsg = formatAudioBackendError(e);
       if (kDebugMode) print(errorMsg);
       final errorState = playbackState.value.copyWith(
         playing: false,
         processingState: AudioProcessingState.idle,
+        controls: [
+          MediaControl.rewind,
+          MediaControl.play,
+          MediaControl.fastForward,
+          if (_queue.isNotEmpty) MediaControl.skipToNext,
+          MediaControl.stop,
+        ],
       );
       playbackState.add(errorState);
       if (urlLoader == null) {
@@ -654,6 +688,11 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       }
       if (!_playbackErrorController.isClosed) {
         _playbackErrorController.add(errorMsg);
+      }
+      return;
+    } finally {
+      if (_preparingSourceCompleter == completer) {
+        _preparingSourceCompleter = null;
       }
     }
   }
@@ -686,7 +725,9 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     }
 
     if (_preparingSourceCompleter != null) {
-      await _preparingSourceCompleter!.future;
+      try {
+        await _preparingSourceCompleter!.future;
+      } catch (_) {}
       if (_player.playing) return;
     }
 
@@ -704,18 +745,27 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         playbackState.add(playbackState.value.copyWith(
           playing: true,
           processingState: AudioProcessingState.loading,
-          controls: [MediaControl.pause, MediaControl.rewind, MediaControl.fastForward],
+          controls: [
+            MediaControl.rewind,
+            MediaControl.pause,
+            MediaControl.fastForward,
+            if (_queue.isNotEmpty) MediaControl.skipToNext,
+            MediaControl.stop,
+          ],
         ));
         final completer = Completer<void>();
+        completer.future.catchError((_) {});
         _preparingSourceCompleter = completer;
         try {
           await _prepareAudioSource(_currentEpisode!);
-          completer.complete();
+          if (!completer.isCompleted) completer.complete();
         } catch (e, st) {
-          completer.completeError(e, st);
+          if (!completer.isCompleted) completer.completeError(e, st);
           rethrow;
         } finally {
-          _preparingSourceCompleter = null;
+          if (_preparingSourceCompleter == completer) {
+            _preparingSourceCompleter = null;
+          }
         }
       }
 
@@ -725,10 +775,18 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     } catch (e) {
       if (kDebugMode) print('AudioPlayerService play error: $e');
       final errorMsg = formatAudioBackendError(e);
-      playbackState.add(playbackState.value.copyWith(
+      final errorState = playbackState.value.copyWith(
         playing: false,
         processingState: AudioProcessingState.idle,
-      ));
+        controls: [
+          MediaControl.rewind,
+          MediaControl.play,
+          MediaControl.fastForward,
+          if (_queue.isNotEmpty) MediaControl.skipToNext,
+          MediaControl.stop,
+        ],
+      );
+      playbackState.add(errorState);
       if (!_playbackErrorController.isClosed) {
         _playbackErrorController.add(errorMsg);
       }
@@ -737,6 +795,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> pause() async {
+    _playRequestId++;
     try {
       if (urlLoader != null) {
         playbackState.add(playbackState.value.copyWith(playing: false));
@@ -745,6 +804,16 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         return;
       }
       await _player.pause();
+      playbackState.add(playbackState.value.copyWith(
+        playing: false,
+        controls: [
+          MediaControl.rewind,
+          MediaControl.play,
+          MediaControl.fastForward,
+          if (_queue.isNotEmpty) MediaControl.skipToNext,
+          MediaControl.stop,
+        ],
+      ));
       _stopPeriodicPositionSync();
       await _enqueueCurrentPositionAction();
     } catch (_) {}
@@ -752,6 +821,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> stop() async {
+    _playRequestId++;
     try {
       if (urlLoader != null) {
         playbackState.add(playbackState.value.copyWith(playing: false));
@@ -763,6 +833,17 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       await _enqueueCurrentPositionAction();
       await _player.stop();
       await _setActiveAudioSession(false);
+      playbackState.add(playbackState.value.copyWith(
+        playing: false,
+        processingState: AudioProcessingState.idle,
+        controls: [
+          MediaControl.rewind,
+          MediaControl.play,
+          MediaControl.fastForward,
+          if (_queue.isNotEmpty) MediaControl.skipToNext,
+          MediaControl.stop,
+        ],
+      ));
     } catch (_) {}
   }
 
@@ -784,7 +865,9 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       if (_preparingSourceCompleter != null) {
         _currentEpisode = _currentEpisode!.copyWith(position: position.inSeconds);
         playbackState.add(playbackState.value.copyWith(updatePosition: position));
-        await _preparingSourceCompleter!.future;
+        try {
+          await _preparingSourceCompleter!.future;
+        } catch (_) {}
         await _player.seek(position);
         await _enqueueCurrentPositionAction();
         return;
