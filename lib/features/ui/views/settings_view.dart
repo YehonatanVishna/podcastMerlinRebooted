@@ -585,6 +585,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   Widget _buildDownloadsStorageCard(BuildContext context) {
     final storageAsync = ref.watch(downloadStorageUsageBytesProvider);
     final countAsync = ref.watch(downloadedEpisodesCountProvider);
+    final downloadOnlyOnUnmetered = ref.watch(downloadOnlyOnUnmeteredProvider);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -659,6 +660,17 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                     ),
                   ),
                 ],
+                const Divider(height: 24),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.wifi),
+                  title: const Text('Download only on unmetered Wi-Fi'),
+                  subtitle: const Text('Prevent downloading episodes over mobile data to save bandwidth.'),
+                  value: downloadOnlyOnUnmetered,
+                  onChanged: (val) {
+                    ref.read(downloadOnlyOnUnmeteredProvider.notifier).toggle(val);
+                  },
+                ),
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,

@@ -18,6 +18,7 @@ class SecureStorageService {
   static const String keyPodcastIndexApiSecret = 'podcast_index_api_secret';
   static const String keyRewindDuration = 'playback_rewind_duration';
   static const String keyFastForwardDuration = 'playback_fast_forward_duration';
+  static const String keyDownloadOnlyOnUnmetered = 'download_only_on_unmetered';
 
   Future<void> write(String key, String value) async {
     try {
@@ -47,6 +48,16 @@ class SecureStorageService {
       await _secureStorage.delete(key: key);
     } catch (_) {}
     await _deleteFallback(key);
+  }
+
+  Future<bool> getDownloadOnlyOnUnmetered() async {
+    final val = await read(keyDownloadOnlyOnUnmetered);
+    if (val == null) return false;
+    return val == 'true';
+  }
+
+  Future<void> setDownloadOnlyOnUnmetered(bool value) async {
+    await write(keyDownloadOnlyOnUnmetered, value.toString());
   }
 
   // --- FALLBACK FILE & MEMORY STORAGE ---

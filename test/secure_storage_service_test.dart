@@ -32,5 +32,19 @@ void main() {
       await storage.delete(SecureStorageService.keyUsername);
       expect(await storage.read(SecureStorageService.keyUsername), isNull);
     });
+
+    test('getDownloadOnlyOnUnmetered defaults to false', () async {
+      await storage.delete(SecureStorageService.keyDownloadOnlyOnUnmetered);
+      final value = await storage.getDownloadOnlyOnUnmetered();
+      expect(value, isFalse);
+    });
+
+    test('setDownloadOnlyOnUnmetered persists and retrieves true/false', () async {
+      await storage.setDownloadOnlyOnUnmetered(true);
+      expect(await storage.getDownloadOnlyOnUnmetered(), isTrue);
+
+      await storage.setDownloadOnlyOnUnmetered(false);
+      expect(await storage.getDownloadOnlyOnUnmetered(), isFalse);
+    });
   });
 }

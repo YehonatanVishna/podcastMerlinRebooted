@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/models/episode.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../../core/services/connectivity_service.dart';
 import '../../downloads/episode_download_service.dart';
+import '../../downloads/download_ui_helper.dart';
 import 'cached_image.dart';
 import 'playback_speed_sheet.dart';
 import 'queue_bottom_sheet.dart';
@@ -648,6 +650,7 @@ class _NowPlayingDownloadButtonState extends ConsumerState<_NowPlayingDownloadBu
       );
     } else if (isDownloading) {
       final isQueued = _status == DownloadStatus.queued;
+      final isMeteredWaiting = isWaitingForUnmetered(_error);
       final pct = (_progress * 100).toInt();
       return IconButton(
         constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
@@ -658,19 +661,23 @@ class _NowPlayingDownloadButtonState extends ConsumerState<_NowPlayingDownloadBu
             alignment: Alignment.center,
             children: [
               CircularProgressIndicator(
-                value: (_progress > 0 && !isQueued) ? _progress : null,
+                value: (_progress > 0 && !isQueued) ? _progress : (isQueued ? 0.0 : null),
                 strokeWidth: 2.5,
               ),
               Icon(
-                isQueued ? Icons.hourglass_top : Icons.close,
+                isQueued
+                    ? (isMeteredWaiting ? Icons.wifi_off_rounded : Icons.hourglass_top)
+                    : Icons.close,
                 size: 12,
-                color: theme.colorScheme.onSurfaceVariant,
+                color: isMeteredWaiting ? Colors.orange : theme.colorScheme.onSurfaceVariant,
               ),
             ],
           ),
         ),
         tooltip: isQueued
-            ? 'Queued for download • Tap to cancel'
+            ? (_error?.isNotEmpty == true
+                ? '$_error • Tap to cancel'
+                : 'Queued for download • Tap to cancel')
             : 'Downloading ($pct%) • Tap to cancel',
         onPressed: () {
           final epId = _resolvedEpisodeId ?? widget.episode.id;
@@ -691,11 +698,13 @@ class _NowPlayingDownloadButtonState extends ConsumerState<_NowPlayingDownloadBu
         constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
         icon: const Icon(Icons.play_circle_outline, color: Colors.blue),
         tooltip: 'Download paused • Tap to resume',
-        onPressed: () {
+        onPressed: () async {
           final ep = _getEffectiveEpisode();
-          downloadService.resumeDownload(ep);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Resuming download...')),
+          await triggerDownloadWithFeedback(
+            context: context,
+            ref: ref,
+            episode: ep,
+            isResume: true,
           );
         },
       );
@@ -704,14 +713,13 @@ class _NowPlayingDownloadButtonState extends ConsumerState<_NowPlayingDownloadBu
         constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
         icon: const Icon(Icons.refresh, color: Colors.orange),
         tooltip: 'Download failed (${_error ?? "Tap to retry"})',
-        onPressed: () {
-          setState(() {
-            _status = DownloadStatus.queued;
-          });
+        onPressed: () async {
           final ep = _getEffectiveEpisode();
-          downloadService.startDownload(ep);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Retrying download for "${widget.episode.title}"')),
+          await triggerDownloadWithFeedback(
+            context: context,
+            ref: ref,
+            episode: ep,
+            isRetry: true,
           );
         },
       );
@@ -720,14 +728,12 @@ class _NowPlayingDownloadButtonState extends ConsumerState<_NowPlayingDownloadBu
         constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
         icon: const Icon(Icons.download_outlined),
         tooltip: 'Download Episode',
-        onPressed: () {
-          setState(() {
-            _status = DownloadStatus.queued;
-          });
+        onPressed: () async {
           final ep = _getEffectiveEpisode();
-          downloadService.startDownload(ep);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Starting download for "${widget.episode.title}"')),
+          await triggerDownloadWithFeedback(
+            context: context,
+            ref: ref,
+            episode: ep,
           );
         },
       );

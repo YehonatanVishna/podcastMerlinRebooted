@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/database/database_helper.dart';
 import '../../core/models/episode.dart';
 import '../../core/models/podcast.dart';
+import '../../core/services/connectivity_service.dart';
 
 class DownloadTaskEvent {
   final int episodeId;
@@ -51,6 +52,11 @@ class EpisodeDownloadService {
   final Dio _dio;
   final int maxConcurrentDownloads;
   final Future<Directory> Function()? _customDirResolver;
+  final ConnectivityService? connectivityService;
+  final FutureOr<bool> Function()? isUnmeteredOnly;
+  StreamSubscription<bool>? _connectivitySub;
+  bool _currentIsUnmetered = true;
+  final Set<int> _meteredPausedEpisodeIds = <int>{};
 
   final Map<int, CancelToken> _activeDownloads = {};
   final Set<int> _pausedEpisodeIds = <int>{};
@@ -71,6 +77,8 @@ class EpisodeDownloadService {
     Dio? dio,
     this.maxConcurrentDownloads = 2,
     Future<Directory> Function()? downloadDirResolver,
+    this.connectivityService,
+    this.isUnmeteredOnly,
   })  : _db = db ?? DatabaseHelper.instance,
         _dio = dio ??
             Dio(
@@ -79,15 +87,124 @@ class EpisodeDownloadService {
                 receiveTimeout: const Duration(minutes: 10),
               ),
             ),
-        _customDirResolver = downloadDirResolver;
+        _customDirResolver = downloadDirResolver {
+    _initConnectivity();
+  }
+
+  void _initConnectivity() {
+    if (connectivityService != null) {
+      connectivityService!.isUnmetered().then((val) {
+        _currentIsUnmetered = val;
+      }).catchError((_) {});
+
+      _connectivitySub = connectivityService!.onUnmeteredChanged.listen((isUnmetered) {
+        _currentIsUnmetered = isUnmetered;
+        _handleConnectivityChange(isUnmetered);
+      });
+    }
+  }
+
+  Future<void> _handleConnectivityChange(bool isUnmetered) async {
+    final unmeteredOnly = await _checkUnmeteredOnly();
+    if (!unmeteredOnly) return;
+
+    if (!isUnmetered) {
+      final activeIds = List<int>.from(_activeDownloads.keys);
+      for (final id in activeIds) {
+        _meteredPausedEpisodeIds.add(id);
+        _activeDownloads[id]?.cancel('paused_by_metered_network');
+      }
+    } else {
+      await _clearMeteredWaitingInQueue();
+      await _processNextQueueItem();
+    }
+  }
+
+  Future<void> _clearMeteredWaitingInQueue() async {
+    for (final ep in _queuedEpisodes) {
+      final epId = ep.id;
+      if (epId != null) {
+        final currentTask = _currentTasks[epId];
+        if (currentTask != null && isWaitingForUnmetered(currentTask.error)) {
+          await _db.updateEpisodeDownloadState(
+            epId,
+            status: DownloadStatus.queued,
+            clearError: true,
+          );
+          _emitEvent(
+            DownloadTaskEvent(
+              episodeId: epId,
+              mediaUrl: ep.mediaUrl,
+              episodeTitle: ep.title,
+              imageUrl: ep.imageUrl,
+              status: DownloadStatus.queued,
+              downloadedBytes: currentTask.downloadedBytes,
+              totalBytes: currentTask.totalBytes,
+              progress: currentTask.progress,
+              error: null,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> onUnmeteredSettingChanged(bool unmeteredOnly) async {
+    if (unmeteredOnly) {
+      final isUnmetered = await connectivityService?.isUnmetered() ?? _currentIsUnmetered;
+      _currentIsUnmetered = isUnmetered;
+      if (!isUnmetered) {
+        final activeIds = List<int>.from(_activeDownloads.keys);
+        for (final id in activeIds) {
+          _meteredPausedEpisodeIds.add(id);
+          _activeDownloads[id]?.cancel('paused_by_metered_network');
+        }
+      }
+    } else {
+      await _clearMeteredWaitingInQueue();
+      await _processNextQueueItem();
+    }
+  }
+
+  Future<bool> _checkUnmeteredOnly() async {
+    if (isUnmeteredOnly == null) return false;
+    return await isUnmeteredOnly!();
+  }
+
+  Future<bool> shouldBlockForMeteredNetwork() async {
+    if (isUnmeteredOnly == null || connectivityService == null) {
+      return false;
+    }
+    final unmeteredOnly = await isUnmeteredOnly!();
+    if (!unmeteredOnly) {
+      return false;
+    }
+    final isUnmetered = await connectivityService!.isUnmetered();
+    _currentIsUnmetered = isUnmetered;
+    return !isUnmetered;
+  }
+
+  bool isDownloadBlockedByNetwork() {
+    if (isUnmeteredOnly == null || connectivityService == null) {
+      return false;
+    }
+    final unmeteredOnly = isUnmeteredOnly!();
+    if (unmeteredOnly is bool && !unmeteredOnly) {
+      return false;
+    }
+    return !_currentIsUnmetered;
+  }
 
   void dispose() {
+    _connectivitySub?.cancel();
+    _connectivitySub = null;
     for (final token in _activeDownloads.values) {
       token.cancel('Service disposed');
     }
     _activeDownloads.clear();
     _queuedEpisodes.clear();
     _currentTasks.clear();
+    _meteredPausedEpisodeIds.clear();
     _eventController.close();
     _dio.close(force: true);
   }
@@ -204,6 +321,7 @@ class EpisodeDownloadService {
     }
     if (epId == null) return;
     _pausedEpisodeIds.remove(epId);
+    _meteredPausedEpisodeIds.remove(epId);
 
     updatedEpisode = updatedEpisode.copyWith(id: epId);
 
@@ -215,8 +333,39 @@ class EpisodeDownloadService {
       }
     }
 
-    // If already downloading or queued, do nothing
-    if (isEpisodeActive(epId) || isEpisodeQueued(epId)) {
+    // If already downloading, do nothing
+    if (isEpisodeActive(epId)) {
+      return;
+    }
+
+    if (await shouldBlockForMeteredNetwork()) {
+      if (!isEpisodeQueued(epId)) {
+        _queuedEpisodes.add(updatedEpisode);
+      }
+      const waitingMsg = kWaitingForUnmeteredMessage;
+      await _db.updateEpisodeDownloadState(
+        epId,
+        status: DownloadStatus.queued,
+        error: waitingMsg,
+      );
+      _emitEvent(
+        DownloadTaskEvent(
+          episodeId: epId,
+          mediaUrl: updatedEpisode.mediaUrl,
+          episodeTitle: updatedEpisode.title,
+          imageUrl: updatedEpisode.imageUrl,
+          status: DownloadStatus.queued,
+          progress: updatedEpisode.downloadProgress,
+          downloadedBytes: updatedEpisode.downloadedBytes,
+          totalBytes: updatedEpisode.totalBytes,
+          error: waitingMsg,
+        ),
+      );
+      return;
+    }
+
+    // If already queued, do nothing
+    if (isEpisodeQueued(epId)) {
       return;
     }
 
@@ -272,12 +421,45 @@ class EpisodeDownloadService {
       ),
     );
 
+    int totalBytes = episode.totalBytes > 0 ? episode.totalBytes : 0;
+
     try {
       while (retryCount <= maxRetries) {
+        if (await shouldBlockForMeteredNetwork()) {
+          final partFile = File(partFilePath);
+          int currentBytes = 0;
+          if (await partFile.exists()) {
+            currentBytes = await partFile.length();
+          }
+          if (!isEpisodeQueued(epId)) {
+            _queuedEpisodes.insert(0, episode);
+          }
+          const waitingMsg = kWaitingForUnmeteredMessage;
+          await _db.updateEpisodeDownloadState(
+            epId,
+            status: DownloadStatus.queued,
+            error: waitingMsg,
+          );
+          _emitEvent(
+            DownloadTaskEvent(
+              episodeId: epId,
+              mediaUrl: episode.mediaUrl,
+              episodeTitle: episode.title,
+              imageUrl: episode.imageUrl,
+              status: DownloadStatus.queued,
+              downloadedBytes: currentBytes,
+              totalBytes: totalBytes,
+              progress: totalBytes > 0 ? (currentBytes / totalBytes).clamp(0.0, 1.0) : 0.0,
+              error: waitingMsg,
+            ),
+          );
+          return;
+        }
+
         RandomAccessFile? raf;
+        int startBytes = 0;
         try {
           final partFile = File(partFilePath);
-          int startBytes = 0;
           if (await partFile.exists()) {
             startBytes = await partFile.length();
           }
@@ -355,7 +537,7 @@ class EpisodeDownloadService {
             contentLength = int.tryParse(contentLengthHeader) ?? -1;
           }
 
-          int totalBytes = 0;
+          totalBytes = 0;
           final contentRangeHeader = response.headers.value('content-range');
           if (contentRangeHeader != null) {
             final match = RegExp(r'/(\d+)').firstMatch(contentRangeHeader);
@@ -379,7 +561,7 @@ class EpisodeDownloadService {
           int speedBytesPerSecond = 0;
 
           await for (final chunk in response.data!.stream) {
-            if (cancelToken.isCancelled || _pausedEpisodeIds.contains(epId)) {
+            if (cancelToken.isCancelled || _pausedEpisodeIds.contains(epId) || _meteredPausedEpisodeIds.contains(epId)) {
               break;
             }
             raf.writeFromSync(chunk);
@@ -441,8 +623,33 @@ class EpisodeDownloadService {
           await raf.close();
           raf = null;
 
-          if (cancelToken.isCancelled || _pausedEpisodeIds.contains(epId)) {
-            if (_pausedEpisodeIds.contains(epId)) {
+          final isMetered = _meteredPausedEpisodeIds.contains(epId);
+          if (cancelToken.isCancelled || _pausedEpisodeIds.contains(epId) || isMetered) {
+            if (isMetered) {
+              _meteredPausedEpisodeIds.remove(epId);
+              if (!isEpisodeQueued(epId)) {
+                _queuedEpisodes.insert(0, episode);
+              }
+              const waitingMsg = 'Waiting for unmetered Wi-Fi connection';
+              await _db.updateEpisodeDownloadState(
+                epId,
+                status: DownloadStatus.queued,
+                error: waitingMsg,
+              );
+              _emitEvent(
+                DownloadTaskEvent(
+                  episodeId: epId,
+                  mediaUrl: episode.mediaUrl,
+                  episodeTitle: episode.title,
+                  imageUrl: episode.imageUrl,
+                  status: DownloadStatus.queued,
+                  downloadedBytes: receivedBytes,
+                  totalBytes: totalBytes,
+                  progress: totalBytes > 0 ? (receivedBytes / totalBytes).clamp(0.0, 1.0) : 0.0,
+                  error: waitingMsg,
+                ),
+              );
+            } else if (_pausedEpisodeIds.contains(epId)) {
               await _db.updateEpisodeDownloadState(
                 epId,
                 status: DownloadStatus.paused,
@@ -514,12 +721,40 @@ class EpisodeDownloadService {
             raf = null;
           }
 
+          final isMetered = _meteredPausedEpisodeIds.contains(epId) ||
+              (CancelToken.isCancel(e) &&
+                  (e.error == 'paused_by_metered_network' ||
+                      e.message == 'paused_by_metered_network'));
           final isCancelled = CancelToken.isCancel(e) || cancelToken.isCancelled;
           final isPaused = _pausedEpisodeIds.contains(epId) ||
               (CancelToken.isCancel(e) && (e.error == 'paused_by_user' || e.message == 'paused_by_user'));
 
-          if (isCancelled || isPaused) {
-            if (isPaused) {
+          if (isMetered || isCancelled || isPaused) {
+            if (isMetered) {
+              _meteredPausedEpisodeIds.remove(epId);
+              if (!isEpisodeQueued(epId)) {
+                _queuedEpisodes.insert(0, episode);
+              }
+              const waitingMsg = 'Waiting for unmetered Wi-Fi connection';
+              await _db.updateEpisodeDownloadState(
+                epId,
+                status: DownloadStatus.queued,
+                error: waitingMsg,
+              );
+              _emitEvent(
+                DownloadTaskEvent(
+                  episodeId: epId,
+                  mediaUrl: episode.mediaUrl,
+                  episodeTitle: episode.title,
+                  imageUrl: episode.imageUrl,
+                  status: DownloadStatus.queued,
+                  downloadedBytes: startBytes,
+                  totalBytes: totalBytes,
+                  progress: totalBytes > 0 ? (startBytes / totalBytes).clamp(0.0, 1.0) : 0.0,
+                  error: waitingMsg,
+                ),
+              );
+            } else if (isPaused) {
               await _db.updateEpisodeDownloadState(
                 epId,
                 status: DownloadStatus.paused,
@@ -580,11 +815,36 @@ class EpisodeDownloadService {
             raf = null;
           }
 
+          final isMetered = _meteredPausedEpisodeIds.contains(epId);
           final isCancelled = cancelToken.isCancelled;
           final isPaused = _pausedEpisodeIds.contains(epId);
 
-          if (isCancelled || isPaused) {
-            if (isPaused) {
+          if (isMetered || isCancelled || isPaused) {
+            if (isMetered) {
+              _meteredPausedEpisodeIds.remove(epId);
+              if (!isEpisodeQueued(epId)) {
+                _queuedEpisodes.insert(0, episode);
+              }
+              const waitingMsg = 'Waiting for unmetered Wi-Fi connection';
+              await _db.updateEpisodeDownloadState(
+                epId,
+                status: DownloadStatus.queued,
+                error: waitingMsg,
+              );
+              _emitEvent(
+                DownloadTaskEvent(
+                  episodeId: epId,
+                  mediaUrl: episode.mediaUrl,
+                  episodeTitle: episode.title,
+                  imageUrl: episode.imageUrl,
+                  status: DownloadStatus.queued,
+                  downloadedBytes: startBytes,
+                  totalBytes: totalBytes,
+                  progress: totalBytes > 0 ? (startBytes / totalBytes).clamp(0.0, 1.0) : 0.0,
+                  error: waitingMsg,
+                ),
+              );
+            } else if (isPaused) {
               await _db.updateEpisodeDownloadState(
                 epId,
                 status: DownloadStatus.paused,
@@ -644,6 +904,7 @@ class EpisodeDownloadService {
     } finally {
       _activeDownloads.remove(epId);
       _lastProgressUpdate.remove(epId);
+      _meteredPausedEpisodeIds.remove(epId);
       _processNextQueueItem();
     }
   }
@@ -679,15 +940,19 @@ class EpisodeDownloadService {
     } catch (_) {}
   }
 
-  void _processNextQueueItem() {
-    if (_activeDownloads.length < maxConcurrentDownloads && _queuedEpisodes.isNotEmpty) {
+  Future<void> _processNextQueueItem() async {
+    if (await shouldBlockForMeteredNetwork()) {
+      return;
+    }
+    while (_activeDownloads.length < maxConcurrentDownloads && _queuedEpisodes.isNotEmpty) {
       final next = _queuedEpisodes.removeAt(0);
-      _executeDownload(next);
+      unawaited(_executeDownload(next));
     }
   }
 
   Future<void> pauseDownload(int episodeId) async {
     _pausedEpisodeIds.add(episodeId);
+    _meteredPausedEpisodeIds.remove(episodeId);
     if (_activeDownloads.containsKey(episodeId)) {
       _activeDownloads[episodeId]?.cancel('paused_by_user');
       await _db.updateEpisodeDownloadState(
@@ -729,9 +994,38 @@ class EpisodeDownloadService {
     }
     if (epId == null) return;
     _pausedEpisodeIds.remove(epId);
+    _meteredPausedEpisodeIds.remove(epId);
 
     final updated = episode.copyWith(id: epId, downloadStatus: DownloadStatus.queued);
-    if (isEpisodeActive(epId) || isEpisodeQueued(epId)) return;
+    if (isEpisodeActive(epId)) return;
+
+    if (await shouldBlockForMeteredNetwork()) {
+      if (!isEpisodeQueued(epId)) {
+        _queuedEpisodes.add(updated);
+      }
+      const waitingMsg = kWaitingForUnmeteredMessage;
+      await _db.updateEpisodeDownloadState(
+        epId,
+        status: DownloadStatus.queued,
+        error: waitingMsg,
+      );
+      _emitEvent(
+        DownloadTaskEvent(
+          episodeId: epId,
+          mediaUrl: updated.mediaUrl,
+          episodeTitle: updated.title,
+          imageUrl: updated.imageUrl,
+          status: DownloadStatus.queued,
+          progress: updated.downloadProgress,
+          downloadedBytes: updated.downloadedBytes,
+          totalBytes: updated.totalBytes,
+          error: waitingMsg,
+        ),
+      );
+      return;
+    }
+
+    if (isEpisodeQueued(epId)) return;
 
     if (_activeDownloads.length < maxConcurrentDownloads) {
       unawaited(_executeDownload(updated));
@@ -749,6 +1043,9 @@ class EpisodeDownloadService {
           episodeTitle: updated.title,
           imageUrl: updated.imageUrl,
           status: DownloadStatus.queued,
+          progress: updated.downloadProgress,
+          downloadedBytes: updated.downloadedBytes,
+          totalBytes: updated.totalBytes,
         ),
       );
     }
@@ -815,6 +1112,7 @@ class EpisodeDownloadService {
 
   Future<void> cancelDownload(int episodeId) async {
     _pausedEpisodeIds.remove(episodeId);
+    _meteredPausedEpisodeIds.remove(episodeId);
     if (_activeDownloads.containsKey(episodeId)) {
       _activeDownloads[episodeId]?.cancel('Cancelled by user');
       await _db.clearEpisodeDownload(episodeId);

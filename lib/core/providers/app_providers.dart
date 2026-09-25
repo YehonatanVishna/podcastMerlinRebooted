@@ -6,6 +6,7 @@ import '../models/podcast.dart';
 import '../models/gpodder_action.dart';
 import '../models/sync_status.dart';
 import '../services/image_cache_service.dart';
+import '../services/connectivity_service.dart';
 import '../utils/error_formatter.dart';
 import '../../features/player/audio_player_service.dart';
 import '../../features/sync/gpodder_api_client.dart';
@@ -20,11 +21,57 @@ final databaseProvider = Provider<DatabaseHelper>((ref) => DatabaseHelper.instan
 final secureStorageProvider = Provider<SecureStorageService>((ref) => SecureStorageService());
 final apiClientProvider = Provider<GPodderApiClient>((ref) => GPodderApiClient());
 
+final connectivityServiceProvider = Provider<ConnectivityService>((ref) {
+  final service = DefaultConnectivityService();
+  ref.onDispose(() => service.dispose());
+  return service;
+});
+
+class DownloadOnlyOnUnmeteredNotifier extends StateNotifier<bool> {
+  final SecureStorageService _storage;
+  late final Future<void> isInitialized;
+
+  DownloadOnlyOnUnmeteredNotifier(this._storage) : super(false) {
+    isInitialized = _loadInitial();
+  }
+
+  Future<void> _loadInitial() async {
+    try {
+      final value = await _storage.getDownloadOnlyOnUnmetered();
+      if (mounted) {
+        state = value;
+      }
+    } catch (_) {}
+  }
+
+  Future<void> toggle(bool value) async {
+    state = value;
+    try {
+      await _storage.setDownloadOnlyOnUnmetered(value);
+    } catch (_) {}
+  }
+}
+
+final downloadOnlyOnUnmeteredProvider =
+    StateNotifierProvider<DownloadOnlyOnUnmeteredNotifier, bool>((ref) {
+  return DownloadOnlyOnUnmeteredNotifier(ref.watch(secureStorageProvider));
+});
+
 final episodeDownloadServiceProvider = Provider<EpisodeDownloadService>((ref) {
+  final unmeteredNotifier = ref.watch(downloadOnlyOnUnmeteredProvider.notifier);
   final service = EpisodeDownloadService(
     db: ref.watch(databaseProvider),
+    connectivityService: ref.watch(connectivityServiceProvider),
+    isUnmeteredOnly: () async {
+      await unmeteredNotifier.isInitialized;
+      return ref.read(downloadOnlyOnUnmeteredProvider);
+    },
   );
   service.reconcileOnStartup();
+
+  ref.listen<bool>(downloadOnlyOnUnmeteredProvider, (_, next) {
+    service.onUnmeteredSettingChanged(next);
+  });
 
   final sub = service.onDownloadEvent.listen((event) {
     try {
@@ -334,7 +381,7 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
         downloadedBytes: event.downloadedBytes,
         totalBytes: event.totalBytes,
         downloadError: event.error,
-        clearDownloadError: event.status != DownloadStatus.failed,
+        clearDownloadError: event.status != DownloadStatus.failed && (event.error == null || event.error!.isEmpty),
         downloadPath: event.downloadPath ?? (event.status == DownloadStatus.none ? null : ep.downloadPath),
       );
       state = state.copyWith(episodes: updatedList);

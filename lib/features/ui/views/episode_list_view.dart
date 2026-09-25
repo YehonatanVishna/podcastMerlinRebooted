@@ -6,6 +6,8 @@ import 'package:intl/intl.dart';
 import '../../../core/models/episode.dart';
 import '../../../core/models/podcast.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../../core/services/connectivity_service.dart';
+import '../../downloads/download_ui_helper.dart';
 import '../widgets/cached_image.dart';
 import '../widgets/purified_html_text.dart';
 import '../widgets/sync_error_banner.dart';
@@ -147,6 +149,15 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
         ),
       );
     }
+  }
+
+  Future<void> _handleDownload(Episode ep) async {
+    await triggerDownloadWithFeedback(
+      context: context,
+      ref: ref,
+      episode: ep,
+      isResume: ep.isPaused,
+    );
   }
 
   @override
@@ -755,9 +766,7 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
                       onToggleStar: () => ref
                           .read(episodesNotifierProvider(widget.podcast?.id).notifier)
                           .toggleStar(ep),
-                      onDownload: () => ref
-                          .read(episodeDownloadServiceProvider)
-                          .startDownload(ep),
+                      onDownload: () => _handleDownload(ep),
                       onCancelDownload: () {
                         if (ep.id != null) {
                           ref
@@ -1068,6 +1077,27 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
         },
       );
     } else if (ep.isDownloading) {
+      if (ep.downloadStatus == DownloadStatus.queued) {
+        final isMeteredWaiting = isWaitingForUnmetered(ep.downloadError);
+        return OutlinedButton.icon(
+          icon: Icon(
+            isMeteredWaiting ? Icons.wifi_off_rounded : Icons.hourglass_top,
+            size: 18,
+            color: isMeteredWaiting ? Colors.orange : null,
+          ),
+          label: Text(
+            ep.downloadError?.isNotEmpty == true
+                ? '${ep.downloadError!} • Cancel'
+                : 'Queued for Download • Cancel',
+          ),
+          onPressed: () {
+            Navigator.pop(modalCtx);
+            if (ep.id != null) {
+              ref.read(episodeDownloadServiceProvider).cancelDownload(ep.id!);
+            }
+          },
+        );
+      }
       final pct = (ep.downloadProgress * 100).toStringAsFixed(0);
       return OutlinedButton.icon(
         icon: const SizedBox(
@@ -1090,7 +1120,7 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
         label: const Text('Download Paused • Resume'),
         onPressed: () {
           Navigator.pop(modalCtx);
-          ref.read(episodeDownloadServiceProvider).resumeDownload(ep);
+          _handleDownload(ep);
         },
       );
     } else if (ep.downloadStatus == DownloadStatus.failed) {
@@ -1100,7 +1130,7 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
         label: const Text('Download Failed • Retry'),
         onPressed: () {
           Navigator.pop(modalCtx);
-          ref.read(episodeDownloadServiceProvider).startDownload(ep);
+          _handleDownload(ep);
         },
       );
     } else {
@@ -1109,10 +1139,7 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
         label: const Text('Download Episode'),
         onPressed: () {
           Navigator.pop(modalCtx);
-          ref.read(episodeDownloadServiceProvider).startDownload(ep);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Starting download for "${ep.title}"')),
-          );
+          _handleDownload(ep);
         },
       );
     }
@@ -1185,9 +1212,16 @@ class _EpisodeTile extends StatelessWidget {
       );
     } else if (episode.isDownloading) {
       if (episode.downloadStatus == DownloadStatus.queued) {
+        final isMeteredWaiting = isWaitingForUnmetered(episode.downloadError);
         return IconButton(
-          icon: const Icon(Icons.hourglass_top, size: 20, color: Colors.grey),
-          tooltip: 'Queued for download • Tap to cancel',
+          icon: Icon(
+            isMeteredWaiting ? Icons.wifi_off_rounded : Icons.hourglass_top,
+            size: 20,
+            color: isMeteredWaiting ? Colors.orange : Colors.grey,
+          ),
+          tooltip: episode.downloadError?.isNotEmpty == true
+              ? '${episode.downloadError} • Tap to cancel'
+              : 'Queued for download • Tap to cancel',
           onPressed: onCancelDownload,
         );
       }
@@ -1440,6 +1474,34 @@ class _EpisodeTile extends StatelessWidget {
                   value: progressPercentage,
                   minHeight: 4,
                   borderRadius: BorderRadius.circular(2),
+                ),
+              ],
+              if (episode.downloadStatus == DownloadStatus.queued &&
+                  episode.downloadError?.isNotEmpty == true) ...[
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(
+                      isWaitingForUnmetered(episode.downloadError)
+                          ? Icons.wifi_off_rounded
+                          : Icons.hourglass_top,
+                      size: 13,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        episode.downloadError!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontSize: 11,
+                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ],

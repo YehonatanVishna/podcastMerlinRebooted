@@ -5,6 +5,7 @@ import '../../../core/database/database_helper.dart';
 import '../../../core/models/episode.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/utils/responsive.dart';
+import '../../../core/services/connectivity_service.dart';
 import '../../downloads/episode_download_service.dart';
 import '../widgets/cached_image.dart';
 
@@ -504,6 +505,9 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
                   : cachedEp?.imageUrl;
 
               Widget leadingWidget;
+              final isQueued = event.status == DownloadStatus.queued;
+              final isMeteredWaiting = isWaitingForUnmetered(event.error);
+
               if (displayImageUrl != null && displayImageUrl.isNotEmpty) {
                 leadingWidget = Stack(
                   children: [
@@ -522,6 +526,20 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
                           ),
                           child: const Icon(Icons.pause, color: Colors.white, size: 22),
                         ),
+                      )
+                    else if (isQueued)
+                      Positioned.fill(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            isMeteredWaiting ? Icons.wifi_off_rounded : Icons.hourglass_top,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                        ),
                       ),
                   ],
                 );
@@ -536,7 +554,13 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
                   child: Center(
                     child: event.status == DownloadStatus.paused
                         ? const Icon(Icons.pause, size: 22)
-                        : const Icon(Icons.downloading, size: 22),
+                        : isQueued
+                            ? Icon(
+                                isMeteredWaiting ? Icons.wifi_off_rounded : Icons.hourglass_top,
+                                size: 22,
+                                color: isMeteredWaiting ? Colors.orange : null,
+                              )
+                            : const Icon(Icons.downloading, size: 22),
                   ),
                 );
               }
@@ -554,33 +578,58 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
                   children: [
                     const SizedBox(height: 4),
                     LinearProgressIndicator(
-                      value: event.progress > 0 ? event.progress : null,
+                      value: event.progress > 0 ? event.progress : (isQueued ? 0.0 : null),
                       minHeight: 5,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Text(
-                          '${(event.progress * 100).toStringAsFixed(0)}% • ${_formatBytes(event.downloadedBytes)} / ${_formatBytes(event.totalBytes)}',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        const Spacer(),
-                        if (event.bytesPerSecond > 0)
-                          Text(
-                            _formatSpeed(event.bytesPerSecond),
-                            style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                    if (isQueued && event.error?.isNotEmpty == true)
+                      Row(
+                        children: [
+                          Icon(
+                            isMeteredWaiting ? Icons.wifi_off_rounded : Icons.hourglass_top,
+                            size: 14,
+                            color: theme.colorScheme.primary,
                           ),
-                        if (event.estimatedSecondsRemaining != null &&
-                            event.estimatedSecondsRemaining! > 0) ...[
-                          const SizedBox(width: 6),
-                          Text(
-                            '• ${_formatEta(event.estimatedSecondsRemaining)}',
-                            style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              event.error!,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ],
-                      ],
-                    ),
+                      )
+                    else
+                      Row(
+                        children: [
+                          Text(
+                            isQueued
+                                ? 'Queued for download'
+                                : '${(event.progress * 100).toStringAsFixed(0)}% • ${_formatBytes(event.downloadedBytes)} / ${_formatBytes(event.totalBytes)}',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                          const Spacer(),
+                          if (event.bytesPerSecond > 0)
+                            Text(
+                              _formatSpeed(event.bytesPerSecond),
+                              style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          if (event.estimatedSecondsRemaining != null &&
+                              event.estimatedSecondsRemaining! > 0) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              '• ${_formatEta(event.estimatedSecondsRemaining)}',
+                              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                            ),
+                          ],
+                        ],
+                      ),
                   ],
                 ),
                 trailing: Row(

@@ -257,7 +257,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       downloadPath: downloadPath ?? (status == DownloadStatus.none ? null : _currentEpisode!.downloadPath),
       clearDownloadPath: status == DownloadStatus.none,
       downloadError: error,
-      clearDownloadError: status != DownloadStatus.failed,
+      clearDownloadError: status != DownloadStatus.failed && (error == null || error.isEmpty),
     );
   }
 
