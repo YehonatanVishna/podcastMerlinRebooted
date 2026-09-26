@@ -1069,7 +1069,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     // Check Sleep Timer: if endOfEpisode, stop and cancel timer!
     if (_sleepTimerMode == SleepTimerMode.endOfEpisode) {
       cancelSleepTimer();
-      await pause();
+      await _resetPlaybackSessionToIdle();
       return;
     }
 
@@ -1077,18 +1077,26 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     if (_queue.isNotEmpty) {
       await playNextInQueue();
     } else {
-      await _player.stop();
-      await _setActiveAudioSession(false);
-      playbackState.add(playbackState.value.copyWith(
-        playing: false,
-        processingState: AudioProcessingState.idle,
-        controls: [MediaControl.play],
-        updatePosition: Duration.zero,
-      ));
-      if (urlLoader == null) {
-        PodcastWidgetService.instance.syncEmpty();
-      }
+      await _resetPlaybackSessionToIdle();
     }
+  }
+
+  Future<void> _resetPlaybackSessionToIdle() async {
+    await _player.stop();
+    await _setActiveAudioSession(false);
+    final newState = playbackState.value.copyWith(
+      playing: false,
+      processingState: AudioProcessingState.idle,
+      controls: [MediaControl.play],
+      updatePosition: Duration.zero,
+    );
+    playbackState.add(newState);
+    if (urlLoader == null) {
+      PodcastWidgetService.instance.syncEmpty();
+    }
+    _currentEpisode = null;
+    mediaItem.add(null);
+    LinuxMprisService.instance.updateState(newState, null);
   }
 
   @visibleForTesting

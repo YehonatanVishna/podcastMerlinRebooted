@@ -2,9 +2,9 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../../core/models/search_result_podcast.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../../core/services/url_launcher_service.dart';
 import '../../discovery/discovery_notifier.dart';
 
 class PodcastDiscoveryView extends ConsumerStatefulWidget {
@@ -116,11 +116,8 @@ class _PodcastDiscoveryViewState extends ConsumerState<PodcastDiscoveryView> {
                 if (item.websiteUrl.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   InkWell(
-                    onTap: () async {
-                      final uri = Uri.tryParse(item.websiteUrl);
-                      if (uri != null && await canLaunchUrl(uri)) {
-                        await launchUrl(uri);
-                      }
+                    onTap: () {
+                      UrlLauncherService.launchWebUrl(item.websiteUrl, context: context);
                     },
                     child: Text(
                       'Visit Website',

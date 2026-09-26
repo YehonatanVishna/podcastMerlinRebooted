@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../../core/services/url_launcher_service.dart';
 import '../../../core/utils/html_purifier.dart';
 
 class PurifiedHtmlText extends StatelessWidget {
@@ -23,14 +23,7 @@ class PurifiedHtmlText extends StatelessWidget {
     return HtmlWidget(
       purified,
       textStyle: textStyle,
-      onTapUrl: (url) async {
-        final uri = Uri.tryParse(url);
-        if (uri != null && await canLaunchUrl(uri)) {
-          await launchUrl(uri);
-          return true;
-        }
-        return false;
-      },
+      onTapUrl: (url) => UrlLauncherService.launchWebUrl(url, context: context),
     );
   }
 }

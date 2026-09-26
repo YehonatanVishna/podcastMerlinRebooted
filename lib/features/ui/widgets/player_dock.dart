@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/episode.dart';
 import '../../../core/providers/app_providers.dart';
 import 'cached_image.dart';
+import 'episode_description_sheet.dart';
 import 'now_playing_sheet.dart';
 import 'playback_speed_sheet.dart';
 import 'queue_bottom_sheet.dart';
@@ -381,6 +382,18 @@ class PlayerDock extends ConsumerWidget {
                     tooltip: 'Fast forward ${forwardSec}s',
                     onPressed: () => audioHandler.fastForward(),
                   );
+                },
+              ),
+              // Episode Description button
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.description_outlined),
+                tooltip: 'Episode Description',
+                onPressed: () {
+                  final ep = audioHandler.currentEpisode;
+                  if (ep != null) {
+                    EpisodeDescriptionSheet.show(context, ep);
+                  }
                 },
               ),
               // Speed selector

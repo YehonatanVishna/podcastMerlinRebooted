@@ -18,6 +18,8 @@ class SecureStorageService {
   static const String keyPodcastIndexApiSecret = 'podcast_index_api_secret';
   static const String keyRewindDuration = 'playback_rewind_duration';
   static const String keyFastForwardDuration = 'playback_fast_forward_duration';
+  static const String keyThemeMode = 'app_theme_mode';
+  static const String keyUseDynamicColor = 'app_use_dynamic_color';
 
   Future<void> write(String key, String value) async {
     try {

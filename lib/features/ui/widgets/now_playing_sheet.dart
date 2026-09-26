@@ -7,6 +7,7 @@ import '../../../core/models/episode.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../downloads/episode_download_service.dart';
 import 'cached_image.dart';
+import 'episode_description_sheet.dart';
 import 'playback_speed_sheet.dart';
 import 'queue_bottom_sheet.dart';
 import 'sleep_timer_bottom_sheet.dart';
@@ -44,6 +45,37 @@ class NowPlayingSheet extends ConsumerStatefulWidget {
 
 class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
   double? _dragSeconds;
+  StreamSubscription<MediaItem?>? _mediaItemSub;
+  bool _isDismissing = false;
+
+  void _dismissIfEmpty() {
+    if (_isDismissing || !mounted) return;
+    final audioHandler = ref.read(audioHandlerProvider);
+    if (audioHandler.mediaItem.value == null && audioHandler.currentEpisode == null) {
+      _isDismissing = true;
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final audioHandler = ref.read(audioHandlerProvider);
+      _mediaItemSub = audioHandler.mediaItem.listen((item) {
+        if (item == null && audioHandler.currentEpisode == null) {
+          _dismissIfEmpty();
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _mediaItemSub?.cancel();
+    super.dispose();
+  }
 
   String _formatDuration(Duration d) {
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -372,10 +404,21 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
                             },
                           ),
                           const SizedBox(height: 16),
-                          // Secondary Utility Row: Speed, Sleep Timer, Queue, Download
+                          // Secondary Utility Row: Episode Description, Speed, Sleep Timer, Queue, Download
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
+                              // Episode Description button
+                              IconButton(
+                                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                                icon: const Icon(Icons.description_outlined),
+                                tooltip: 'Episode Description',
+                                onPressed: () {
+                                  if (episode != null) {
+                                    EpisodeDescriptionSheet.show(context, episode);
+                                  }
+                                },
+                              ),
                               // Speed button
                               IconButton(
                                 constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
