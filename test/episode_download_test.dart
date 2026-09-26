@@ -1023,7 +1023,10 @@ void main() {
       expect(find.text('Clear All'), findsOneWidget);
 
       // Tap "Clear All" button
-      await tester.tap(find.text('Clear All'));
+      final clearAllBtn = find.text('Clear All');
+      await tester.ensureVisible(clearAllBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(clearAllBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 

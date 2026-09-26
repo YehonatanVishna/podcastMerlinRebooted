@@ -324,5 +324,49 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(savedData['widget_is_buffering'], false);
     });
+
+    test('updateThemeColors saves primary and onPrimary colors and triggers widget update on Android', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final service = PodcastWidgetService.instance;
+
+      const primary = Color(0xFF6750A4);
+      const onPrimary = Color(0xFFFFFFFF);
+
+      await service.updateThemeColors(primaryColor: primary, onPrimaryColor: onPrimary);
+
+      expect(savedData['widget_color_primary'], primary.toARGB32().toSigned(32));
+      expect(savedData['widget_color_on_primary'], onPrimary.toARGB32().toSigned(32));
+      expect(updatedWidgets, contains('PodcastPlayerWidgetProvider'));
+    });
+
+    test('updateThemeColors is a no-op when platform is not Android', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      final service = PodcastWidgetService.instance;
+
+      await service.updateThemeColors(
+        primaryColor: const Color(0xFF123456),
+        onPrimaryColor: const Color(0xFF654321),
+      );
+
+      expect(savedData['widget_color_primary'], isNull);
+      expect(savedData['widget_color_on_primary'], isNull);
+      expect(updatedWidgets, isEmpty);
+    });
+
+    test('updateThemeColors skips redundant IPC if colors have not changed', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final service = PodcastWidgetService.instance;
+
+      const primary = Color(0xFF6750A4);
+      const onPrimary = Color(0xFFFFFFFF);
+
+      await service.updateThemeColors(primaryColor: primary, onPrimaryColor: onPrimary);
+      expect(updatedWidgets.length, 1);
+
+      // Call again with exact same colors
+      await service.updateThemeColors(primaryColor: primary, onPrimaryColor: onPrimary);
+      // Count should still be 1 (no redundant save or IPC)
+      expect(updatedWidgets.length, 1);
+    });
   });
 }

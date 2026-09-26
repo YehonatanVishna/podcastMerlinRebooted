@@ -1415,6 +1415,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       final exportBtn = find.text('Export OPML');
+      await tester.ensureVisible(exportBtn);
+      await tester.pumpAndSettle();
       await tester.tap(exportBtn);
       await tester.runAsync(() async {
         await Future.delayed(const Duration(milliseconds: 300));
@@ -1481,6 +1483,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       final importBtn = find.text('Import OPML');
+      await tester.ensureVisible(importBtn);
+      await tester.pumpAndSettle();
       await tester.tap(importBtn);
       await tester.runAsync(() async {
         await Future.delayed(const Duration(milliseconds: 300));
@@ -1576,6 +1580,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       final importBtn = find.text('Import OPML');
+      await tester.ensureVisible(importBtn);
+      await tester.pumpAndSettle();
       await tester.tap(importBtn);
       await tester.runAsync(() async {
         await Future.delayed(const Duration(milliseconds: 300));

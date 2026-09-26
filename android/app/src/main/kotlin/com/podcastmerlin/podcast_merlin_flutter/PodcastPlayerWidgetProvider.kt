@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -62,6 +63,35 @@ class PodcastPlayerWidgetProvider : HomeWidgetProvider() {
                 // Progress (0 to 100)
                 val progress = widgetData.getInt("widget_progress", 0)
                 setProgressBar(R.id.widget_progress_bar, 100, progress.coerceIn(0, 100), false)
+
+                // Dynamic theme colors (accent color sync from app)
+                val defaultPrimary = 0xFFD0BCFF.toInt()
+                val defaultOnPrimary = 0xFF381E72.toInt()
+                val primaryColor =
+                    (widgetData.all["widget_color_primary"] as? Number)?.toInt() ?: defaultPrimary
+                val onPrimaryColor =
+                    (widgetData.all["widget_color_on_primary"] as? Number)?.toInt() ?: defaultOnPrimary
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setColorStateList(
+                        R.id.widget_btn_play_pause,
+                        "setBackgroundTintList",
+                        ColorStateList.valueOf(primaryColor)
+                    )
+                    setInt(R.id.widget_btn_play_pause, "setColorFilter", onPrimaryColor)
+                    setColorStateList(
+                        R.id.widget_progress_bar,
+                        "setProgressTintList",
+                        ColorStateList.valueOf(primaryColor)
+                    )
+                    // The spinner renders inside the primaryColor play/pause circle,
+                    // so onPrimaryColor provides high contrast against the circular background.
+                    setColorStateList(
+                        R.id.widget_buffering_spinner,
+                        "setIndeterminateTintList",
+                        ColorStateList.valueOf(onPrimaryColor)
+                    )
+                }
 
                 // Artwork
                 val artworkPath = widgetData.getString("widget_artwork_path", null)

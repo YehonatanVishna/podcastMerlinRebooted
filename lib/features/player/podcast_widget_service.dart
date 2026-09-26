@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show Color;
 import 'package:home_widget/home_widget.dart';
 import '../../core/services/image_cache_service.dart';
 
@@ -20,6 +21,8 @@ class PodcastWidgetService {
 
   PlaybackState? _lastState;
   MediaItem? _lastItem;
+  int? _lastPrimaryColor;
+  int? _lastOnPrimaryColor;
   DateTime _lastPositionUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   bool _isUpdating = false;
   bool _hasPendingUpdate = false;
@@ -82,6 +85,11 @@ class PodcastWidgetService {
     }
   }
 
+  Future<void> _updateWidget() => HomeWidget.updateWidget(
+        name: _androidWidgetName,
+        qualifiedAndroidName: _androidQualifiedName,
+      );
+
   /// Explicitly reset widget data to empty state when playback is cleared or finishes
   Future<void> syncEmpty() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
@@ -95,13 +103,37 @@ class PodcastWidgetService {
         HomeWidget.saveWidgetData<int>('widget_progress', 0),
         HomeWidget.saveWidgetData<String?>('widget_artwork_path', null),
       ]);
-      await HomeWidget.updateWidget(
-        name: _androidWidgetName,
-        qualifiedAndroidName: _androidQualifiedName,
-      );
+      await _updateWidget();
     } catch (e) {
       if (kDebugMode) {
         print('PodcastWidgetService syncEmpty error: $e');
+      }
+    }
+  }
+
+  /// Updates the home screen widget accent theme colors based on the app's active color scheme.
+  Future<void> updateThemeColors({
+    required Color primaryColor,
+    required Color onPrimaryColor,
+  }) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+
+    final pVal = primaryColor.toARGB32().toSigned(32);
+    final opVal = onPrimaryColor.toARGB32().toSigned(32);
+
+    if (_lastPrimaryColor == pVal && _lastOnPrimaryColor == opVal) return;
+
+    try {
+      await Future.wait([
+        HomeWidget.saveWidgetData<int>('widget_color_primary', pVal),
+        HomeWidget.saveWidgetData<int>('widget_color_on_primary', opVal),
+      ]);
+      await _updateWidget();
+      _lastPrimaryColor = pVal;
+      _lastOnPrimaryColor = opVal;
+    } catch (e) {
+      if (kDebugMode) {
+        print('PodcastWidgetService updateThemeColors error: $e');
       }
     }
   }
@@ -161,10 +193,7 @@ class PodcastWidgetService {
             unawaited(ImageCacheService.downloadAndCache(url).then((file) {
               if (file != null && _lastItem?.artUri?.toString() == url) {
                 HomeWidget.saveWidgetData<String>('widget_artwork_path', file.path);
-                HomeWidget.updateWidget(
-                  name: _androidWidgetName,
-                  qualifiedAndroidName: _androidQualifiedName,
-                );
+                _updateWidget();
               }
             }));
           }
@@ -180,10 +209,7 @@ class PodcastWidgetService {
         HomeWidget.saveWidgetData<String?>('widget_artwork_path', artworkPath),
       ]);
 
-      await HomeWidget.updateWidget(
-        name: _androidWidgetName,
-        qualifiedAndroidName: _androidQualifiedName,
-      );
+      await _updateWidget();
     } catch (e) {
       if (kDebugMode) {
         print('PodcastWidgetService sync error: $e');
@@ -199,6 +225,8 @@ class PodcastWidgetService {
     _mediaItemSub = null;
     _lastState = null;
     _lastItem = null;
+    _lastPrimaryColor = null;
+    _lastOnPrimaryColor = null;
     _isUpdating = false;
     _hasPendingUpdate = false;
   }

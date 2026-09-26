@@ -11,6 +11,7 @@ import 'core/theme/app_theme.dart';
 import 'core/theme/theme_provider.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'features/player/audio_player_service.dart';
+import 'features/player/podcast_widget_service.dart';
 import 'features/ui/views/main_shell.dart';
 
 class GoBackIntent extends Intent {
@@ -98,6 +99,16 @@ class PodcastMerlinApp extends ConsumerWidget {
         final darkTheme = AppTheme.createDarkTheme(
           themeSettings.useDynamicColor ? darkDynamic : null,
         );
+
+        // The Android home screen widget card has a fixed dark surface (#211F2E),
+        // so it always syncs darkTheme's harmonized primary/onPrimary accents
+        // for optimal contrast and readability regardless of app ThemeMode.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          PodcastWidgetService.instance.updateThemeColors(
+            primaryColor: darkTheme.colorScheme.primary,
+            onPrimaryColor: darkTheme.colorScheme.onPrimary,
+          );
+        });
 
         return MaterialApp(
           navigatorKey: rootNavigatorKey,
