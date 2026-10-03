@@ -1,0 +1,3 @@
+# Test configuration for podcastMerlinRebooted
+# Set concurrency to 1 to prevent parallel SQLite database collisions across test suites
+concurrency: 1

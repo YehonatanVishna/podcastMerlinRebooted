@@ -1111,33 +1111,42 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
 
     final completedEp = _currentEpisode;
 
-    // Check Sleep Timer: if endOfEpisode, stop and cancel timer!
-    if (_sleepTimerMode == SleepTimerMode.endOfEpisode) {
-      cancelSleepTimer();
-      await pause();
-    } else if (autoAdvanceQueue && _queue.isNotEmpty) {
-      // Automatically pop and play next episode if autoAdvanceQueue is enabled and queue has items!
-      await playNextInQueue();
-    } else {
-      await _player.stop();
-      await _setActiveAudioSession(false);
-      playbackState.add(playbackState.value.copyWith(
-        playing: false,
-        processingState: AudioProcessingState.idle,
-        controls: [MediaControl.play],
-        updatePosition: Duration.zero,
-      ));
-      if (urlLoader == null) {
-        PodcastWidgetService.instance.syncEmpty();
-      }
-    }
-
     // Notify listeners (e.g. for auto-deletion of played downloads)
     if (completedEp != null && autoDeleteAfterPlay) {
       try {
         onEpisodeCompleted?.call(completedEp);
       } catch (_) {}
     }
+
+    // Check Sleep Timer: if endOfEpisode, stop and cancel timer!
+    if (_sleepTimerMode == SleepTimerMode.endOfEpisode) {
+      cancelSleepTimer();
+      await _resetPlaybackSessionToIdle();
+      return;
+    } else if (autoAdvanceQueue && _queue.isNotEmpty) {
+      // Automatically pop and play next episode if autoAdvanceQueue is enabled and queue has items!
+      await playNextInQueue();
+    } else {
+      await _resetPlaybackSessionToIdle();
+    }
+  }
+
+  Future<void> _resetPlaybackSessionToIdle() async {
+    await _player.stop();
+    await _setActiveAudioSession(false);
+    final newState = playbackState.value.copyWith(
+      playing: false,
+      processingState: AudioProcessingState.idle,
+      controls: [MediaControl.play],
+      updatePosition: Duration.zero,
+    );
+    playbackState.add(newState);
+    if (urlLoader == null) {
+      PodcastWidgetService.instance.syncEmpty();
+    }
+    _currentEpisode = null;
+    mediaItem.add(null);
+    LinuxMprisService.instance.updateState(newState, null);
   }
 
   @visibleForTesting

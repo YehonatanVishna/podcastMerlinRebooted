@@ -50,6 +50,7 @@ class RssFeedParser {
               BaseOptions(
                 connectTimeout: const Duration(seconds: 15),
                 receiveTimeout: const Duration(seconds: 15),
+                maxRedirects: 15,
                 headers: {
                   'User-Agent': 'PodcastMerlin/2.0 (Flutter RSS Reader)',
                 },

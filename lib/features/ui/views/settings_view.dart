@@ -3,6 +3,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/services/image_cache_service.dart';
+import '../../../core/theme/theme_provider.dart';
 import '../../sync/opml_ui_helper.dart';
 import '../../sync/secure_storage_service.dart';
 import '../widgets/sync_error_banner.dart';
@@ -585,6 +586,19 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                               ),
                             );
                           }).toList(),
+                        ),
+                        const SizedBox(height: 12),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: const Icon(Icons.color_lens_outlined),
+                          title: const Text('Use system theme color'),
+                          subtitle: const Text(
+                            'Adapts brand and accent colors to your OS system theme or wallpaper (Android 12+, Windows, macOS, Linux).',
+                          ),
+                          value: ref.watch(themeSettingsProvider).useDynamicColor,
+                          onChanged: (val) {
+                            ref.read(themeSettingsProvider.notifier).setUseDynamicColor(val);
+                          },
                         ),
                         const SizedBox(height: 16),
                         const Divider(),
