@@ -59,6 +59,9 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
 
+      // Eagerly instantiate download service so onEpisodeCompleted is hooked
+      ref.read(episodeDownloadServiceProvider);
+
       final settings = ref.read(appSettingsProvider);
       final landingIndex = settings.defaultLandingTab.index;
       if (landingIndex != 0 && _history.length == 1 && _historyIndex == 0) {

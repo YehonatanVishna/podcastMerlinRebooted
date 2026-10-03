@@ -122,8 +122,13 @@ class AppSettings {
   final bool downloadWifiOnly;
   final int maxConcurrentDownloads;
   final AutoDeletePlayedPolicy autoDeletePlayed;
+  final bool autoDeleteAfterPlay;
   final bool autoDownloadNewEpisodes;
   final int autoDownloadMaxPerShow;
+
+  bool get autoDownloadLastNEpisodes => autoDownloadNewEpisodes;
+  int get autoDownloadEpisodesPerShow => autoDownloadMaxPerShow;
+
   final int maxStorageQuotaGb;
   final String? customDownloadPath;
 
@@ -154,6 +159,7 @@ class AppSettings {
     this.downloadWifiOnly = true,
     this.maxConcurrentDownloads = 2,
     this.autoDeletePlayed = AutoDeletePlayedPolicy.immediately,
+    this.autoDeleteAfterPlay = true,
     this.autoDownloadNewEpisodes = false,
     this.autoDownloadMaxPerShow = 3,
     this.maxStorageQuotaGb = 10,
@@ -185,6 +191,7 @@ class AppSettings {
     bool? downloadWifiOnly,
     int? maxConcurrentDownloads,
     AutoDeletePlayedPolicy? autoDeletePlayed,
+    bool? autoDeleteAfterPlay,
     bool? autoDownloadNewEpisodes,
     int? autoDownloadMaxPerShow,
     int? maxStorageQuotaGb,
@@ -198,6 +205,18 @@ class AppSettings {
     String? podcastIndexApiKey,
     String? podcastIndexApiSecret,
   }) {
+    AutoDeletePlayedPolicy resolvedPolicy = autoDeletePlayed ?? this.autoDeletePlayed;
+    bool resolvedAutoDeleteAfterPlay = autoDeleteAfterPlay ?? this.autoDeleteAfterPlay;
+    if (autoDeleteAfterPlay != null && autoDeletePlayed == null) {
+      if (!autoDeleteAfterPlay) {
+        resolvedPolicy = AutoDeletePlayedPolicy.never;
+      } else if (resolvedPolicy == AutoDeletePlayedPolicy.never) {
+        resolvedPolicy = AutoDeletePlayedPolicy.immediately;
+      }
+    } else if (autoDeletePlayed != null && autoDeleteAfterPlay == null) {
+      resolvedAutoDeleteAfterPlay = autoDeletePlayed != AutoDeletePlayedPolicy.never;
+    }
+
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
       accentColor: accentColor ?? this.accentColor,
@@ -215,7 +234,8 @@ class AppSettings {
       fastForwardDurationSeconds: fastForwardDurationSeconds ?? this.fastForwardDurationSeconds,
       downloadWifiOnly: downloadWifiOnly ?? this.downloadWifiOnly,
       maxConcurrentDownloads: maxConcurrentDownloads ?? this.maxConcurrentDownloads,
-      autoDeletePlayed: autoDeletePlayed ?? this.autoDeletePlayed,
+      autoDeletePlayed: resolvedPolicy,
+      autoDeleteAfterPlay: resolvedAutoDeleteAfterPlay,
       autoDownloadNewEpisodes: autoDownloadNewEpisodes ?? this.autoDownloadNewEpisodes,
       autoDownloadMaxPerShow: autoDownloadMaxPerShow ?? this.autoDownloadMaxPerShow,
       maxStorageQuotaGb: maxStorageQuotaGb ?? this.maxStorageQuotaGb,
@@ -249,6 +269,7 @@ class AppSettings {
       'downloadWifiOnly': downloadWifiOnly,
       'maxConcurrentDownloads': maxConcurrentDownloads,
       'autoDeletePlayed': autoDeletePlayed.name,
+      'autoDeleteAfterPlay': autoDeleteAfterPlay,
       'autoDownloadNewEpisodes': autoDownloadNewEpisodes,
       'autoDownloadMaxPerShow': autoDownloadMaxPerShow,
       'maxStorageQuotaGb': maxStorageQuotaGb,
@@ -338,6 +359,8 @@ class AppSettings {
       downloadWifiOnly: json['downloadWifiOnly'] as bool? ?? true,
       maxConcurrentDownloads: json['maxConcurrentDownloads'] as int? ?? 2,
       autoDeletePlayed: parseAutoDelete(json['autoDeletePlayed']),
+      autoDeleteAfterPlay: json['autoDeleteAfterPlay'] as bool? ??
+          (parseAutoDelete(json['autoDeletePlayed']) != AutoDeletePlayedPolicy.never),
       autoDownloadNewEpisodes: json['autoDownloadNewEpisodes'] as bool? ?? false,
       autoDownloadMaxPerShow: json['autoDownloadMaxPerShow'] as int? ?? 3,
       maxStorageQuotaGb: json['maxStorageQuotaGb'] as int? ?? 10,

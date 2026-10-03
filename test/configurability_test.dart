@@ -50,6 +50,11 @@ void main() {
       expect(settings.downloadWifiOnly, isTrue);
       expect(settings.maxConcurrentDownloads, 2);
       expect(settings.autoDeletePlayed, AutoDeletePlayedPolicy.immediately);
+      expect(settings.autoDeleteAfterPlay, isTrue);
+      expect(settings.autoDownloadNewEpisodes, isFalse);
+      expect(settings.autoDownloadLastNEpisodes, isFalse);
+      expect(settings.autoDownloadMaxPerShow, 3);
+      expect(settings.autoDownloadEpisodesPerShow, 3);
       expect(settings.maxStorageQuotaGb, 10);
       expect(settings.syncOnLaunch, isTrue);
       expect(settings.periodicSyncIntervalMinutes, 180);
@@ -77,6 +82,7 @@ void main() {
         downloadWifiOnly: false,
         maxConcurrentDownloads: 4,
         autoDeletePlayed: AutoDeletePlayedPolicy.after24h,
+        autoDeleteAfterPlay: false,
         maxStorageQuotaGb: 20,
         syncOnLaunch: false,
         periodicSyncIntervalMinutes: 60,
@@ -107,6 +113,7 @@ void main() {
       expect(parsed.downloadWifiOnly, isFalse);
       expect(parsed.maxConcurrentDownloads, 4);
       expect(parsed.autoDeletePlayed, AutoDeletePlayedPolicy.after24h);
+      expect(parsed.autoDeleteAfterPlay, isFalse);
       expect(parsed.maxStorageQuotaGb, 20);
       expect(parsed.syncOnLaunch, isFalse);
       expect(parsed.periodicSyncIntervalMinutes, 60);
@@ -152,6 +159,24 @@ void main() {
       notifier.setDefaultEpisodeSort(EpisodeSortOrder.oldestFirst);
       expect(container.read(appSettingsProvider).defaultEpisodeSort, EpisodeSortOrder.oldestFirst);
 
+      expect(container.read(appSettingsProvider).autoDeleteAfterPlay, isTrue);
+      notifier.setAutoDeleteAfterPlay(false);
+      expect(container.read(appSettingsProvider).autoDeleteAfterPlay, isFalse);
+      expect(container.read(appSettingsProvider).autoDeletePlayed, AutoDeletePlayedPolicy.never);
+
+      notifier.setAutoDeleteAfterPlay(true);
+      expect(container.read(appSettingsProvider).autoDeleteAfterPlay, isTrue);
+      expect(container.read(appSettingsProvider).autoDeletePlayed, AutoDeletePlayedPolicy.immediately);
+
+      expect(container.read(appSettingsProvider).autoDownloadNewEpisodes, isFalse);
+      notifier.setAutoDownloadNewEpisodes(true);
+      expect(container.read(appSettingsProvider).autoDownloadNewEpisodes, isTrue);
+      expect(container.read(appSettingsProvider).autoDownloadLastNEpisodes, isTrue);
+
+      notifier.setAutoDownloadMaxPerShow(5);
+      expect(container.read(appSettingsProvider).autoDownloadMaxPerShow, 5);
+      expect(container.read(appSettingsProvider).autoDownloadEpisodesPerShow, 5);
+
       // Verify persistence written to storage
       final storedJson = await mockStorage.read('merlin_app_settings_v1');
       expect(storedJson, isNotNull);
@@ -161,6 +186,9 @@ void main() {
       expect(decoded['autoAdvanceQueue'], false);
       expect(decoded['compactEpisodeRows'], true);
       expect(decoded['defaultEpisodeSort'], 'oldestFirst');
+      expect(decoded['autoDeleteAfterPlay'], true);
+      expect(decoded['autoDownloadNewEpisodes'], true);
+      expect(decoded['autoDownloadMaxPerShow'], 5);
 
       container.dispose();
     });
@@ -186,6 +214,10 @@ void main() {
 
       handler.setDefaultSpeed(2.0);
       expect(handler.playbackState.value.speed, 2.0);
+
+      expect(handler.autoDeleteAfterPlay, isTrue);
+      handler.setAutoDeleteAfterPlay(false);
+      expect(handler.autoDeleteAfterPlay, isFalse);
 
       handler.dispose();
     });
@@ -219,6 +251,8 @@ void main() {
         ProviderScope(
           overrides: [
             secureStorageProvider.overrideWithValue(mockStorage),
+            downloadStorageUsageBytesProvider.overrideWith((ref) => Future.value(0)),
+            downloadedEpisodesCountProvider.overrideWith((ref) => Future.value(0)),
           ],
           child: const MaterialApp(
             home: SettingsView(),
@@ -252,6 +286,8 @@ void main() {
           container: container = ProviderContainer(
             overrides: [
               secureStorageProvider.overrideWithValue(mockStorage),
+              downloadStorageUsageBytesProvider.overrideWith((ref) => Future.value(0)),
+              downloadedEpisodesCountProvider.overrideWith((ref) => Future.value(0)),
             ],
           ),
           child: const MaterialApp(
@@ -272,6 +308,79 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(container.read(appSettingsProvider).themeMode, AppThemeMode.amoled);
+
+      container.dispose();
+    });
+
+    testWidgets('Toggling auto-delete episode after play switch updates settings', (tester) async {
+      final mockStorage = MockSecureStorage();
+      late ProviderContainer container;
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container = ProviderContainer(
+            overrides: [
+              secureStorageProvider.overrideWithValue(mockStorage),
+              downloadStorageUsageBytesProvider.overrideWith((ref) => Future.value(0)),
+              downloadedEpisodesCountProvider.overrideWith((ref) => Future.value(0)),
+            ],
+          ),
+          child: const MaterialApp(
+            home: SettingsView(),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      expect(container.read(appSettingsProvider).autoDeleteAfterPlay, isTrue);
+
+      final autoDeleteFinder = find.widgetWithText(SwitchListTile, 'Auto-Delete Episode After Play');
+      expect(autoDeleteFinder, findsWidgets);
+
+      await tester.ensureVisible(autoDeleteFinder.first);
+      await tester.tap(autoDeleteFinder.first);
+      await tester.pumpAndSettle();
+
+      expect(container.read(appSettingsProvider).autoDeleteAfterPlay, isFalse);
+      expect(container.read(appSettingsProvider).autoDeletePlayed, AutoDeletePlayedPolicy.never);
+
+      container.dispose();
+    });
+
+    testWidgets('Toggling auto-download last episodes switch reveals dropdown and updates settings', (tester) async {
+      final mockStorage = MockSecureStorage();
+      late ProviderContainer container;
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container = ProviderContainer(
+            overrides: [
+              secureStorageProvider.overrideWithValue(mockStorage),
+              downloadStorageUsageBytesProvider.overrideWith((ref) => Future.value(0)),
+              downloadedEpisodesCountProvider.overrideWith((ref) => Future.value(0)),
+            ],
+          ),
+          child: const MaterialApp(
+            home: SettingsView(),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      expect(container.read(appSettingsProvider).autoDownloadNewEpisodes, isFalse);
+
+      final autoDownloadFinder = find.widgetWithText(SwitchListTile, 'Auto-Download Last Episodes');
+      expect(autoDownloadFinder, findsOneWidget);
+
+      await tester.ensureVisible(autoDownloadFinder);
+      await tester.tap(autoDownloadFinder);
+      await tester.pumpAndSettle();
+
+      expect(container.read(appSettingsProvider).autoDownloadNewEpisodes, isTrue);
+      expect(find.text('Episodes Per Subscription to Keep Downloaded'), findsOneWidget);
+      expect(find.text('Download Latest Episodes Now'), findsOneWidget);
 
       container.dispose();
     });

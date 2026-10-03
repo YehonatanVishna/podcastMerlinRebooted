@@ -36,6 +36,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   AutoFocusLossAction audioFocusLossAction = AutoFocusLossAction.pauseAndResume;
   int sleepTimerFadeOutSeconds = 15;
   bool skipSilence = false;
+  bool autoDeleteAfterPlay = true;
   void Function(Episode episode)? onEpisodeCompleted;
 
   // Sleep timer state
@@ -1108,23 +1109,14 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     }
     _stopPeriodicPositionSync();
 
-    // Notify listeners (e.g. for auto-deletion of played downloads)
     final completedEp = _currentEpisode;
-    if (completedEp != null) {
-      try {
-        onEpisodeCompleted?.call(completedEp);
-      } catch (_) {}
-    }
 
     // Check Sleep Timer: if endOfEpisode, stop and cancel timer!
     if (_sleepTimerMode == SleepTimerMode.endOfEpisode) {
       cancelSleepTimer();
       await pause();
-      return;
-    }
-
-    // Automatically pop and play next episode if autoAdvanceQueue is enabled and queue has items!
-    if (autoAdvanceQueue && _queue.isNotEmpty) {
+    } else if (autoAdvanceQueue && _queue.isNotEmpty) {
+      // Automatically pop and play next episode if autoAdvanceQueue is enabled and queue has items!
       await playNextInQueue();
     } else {
       await _player.stop();
@@ -1138,6 +1130,13 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       if (urlLoader == null) {
         PodcastWidgetService.instance.syncEmpty();
       }
+    }
+
+    // Notify listeners (e.g. for auto-deletion of played downloads)
+    if (completedEp != null && autoDeleteAfterPlay) {
+      try {
+        onEpisodeCompleted?.call(completedEp);
+      } catch (_) {}
     }
   }
 
@@ -1335,6 +1334,10 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         await _player.setSkipSilenceEnabled(skip);
       }
     } catch (_) {}
+  }
+
+  void setAutoDeleteAfterPlay(bool enabled) {
+    autoDeleteAfterPlay = enabled;
   }
 
   void dispose() {

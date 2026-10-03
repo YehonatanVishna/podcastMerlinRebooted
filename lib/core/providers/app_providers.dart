@@ -52,7 +52,7 @@ final episodeDownloadServiceProvider = Provider<EpisodeDownloadService>((ref) {
     handler.onEpisodeCompleted = (episode) async {
       try {
         final settings = ref.read(appSettingsProvider);
-        if (settings.autoDeletePlayed == AutoDeletePlayedPolicy.immediately) {
+        if (settings.autoDeleteAfterPlay && settings.autoDeletePlayed == AutoDeletePlayedPolicy.immediately) {
           await service.deleteDownload(episode);
         }
       } catch (_) {}
@@ -186,15 +186,37 @@ final audioHandlerProvider = Provider<MerlinAudioHandler>((ref) {
 class PodcastsNotifier extends StateNotifier<AsyncValue<List<Podcast>>> {
   final DatabaseHelper _db;
   final SyncStatusNotifier _syncStatusNotifier;
+  final Ref? _ref;
   StreamSubscription<SyncStatusState>? _syncSub;
 
-  PodcastsNotifier(this._db, this._syncStatusNotifier) : super(const AsyncValue.loading()) {
+  PodcastsNotifier(this._db, this._syncStatusNotifier, [this._ref]) : super(const AsyncValue.loading()) {
     loadPodcasts();
     _syncSub = _syncStatusNotifier.stream.listen((syncState) {
       if (!syncState.isSyncing && syncState.stage == SyncStage.completed) {
         loadPodcasts();
+        _triggerAutoDownloadIfEnabled();
       }
     });
+  }
+
+  void _triggerAutoDownloadIfEnabled({int? podcastId}) {
+    if (_ref == null) return;
+    try {
+      final settings = _ref.read(appSettingsProvider);
+      if (settings.autoDownloadNewEpisodes) {
+        final downloadService = _ref.read(episodeDownloadServiceProvider);
+        if (podcastId != null) {
+          downloadService.autoDownloadForPodcast(
+            podcastId,
+            maxEpisodes: settings.autoDownloadMaxPerShow,
+          );
+        } else {
+          downloadService.autoDownloadSubscriptions(
+            maxEpisodesPerSubscription: settings.autoDownloadMaxPerShow,
+          );
+        }
+      }
+    } catch (_) {}
   }
 
   @override
@@ -226,6 +248,7 @@ class PodcastsNotifier extends StateNotifier<AsyncValue<List<Podcast>>> {
     final saved = await _syncStatusNotifier.fetchAndSaveFeed(rssUrl);
     if (saved != null) {
       await loadPodcasts();
+      _triggerAutoDownloadIfEnabled(podcastId: saved.id);
       _syncStatusNotifier.pushBacklog().catchError((_) => false);
       return true;
     }
@@ -248,6 +271,7 @@ class PodcastsNotifier extends StateNotifier<AsyncValue<List<Podcast>>> {
   Future<void> refreshAll({bool forceFullResync = false}) async {
     await _syncStatusNotifier.performFullSync(forceFullResync: forceFullResync);
     await loadPodcasts();
+    _triggerAutoDownloadIfEnabled();
   }
 }
 
@@ -256,6 +280,7 @@ final podcastsNotifierProvider =
   return PodcastsNotifier(
     ref.watch(databaseProvider),
     ref.watch(syncStatusNotifierProvider.notifier),
+    ref,
   );
 });
 

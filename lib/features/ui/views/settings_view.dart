@@ -386,22 +386,32 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                             if (val != null) settingsNotifier.setMaxConcurrentDownloads(val);
                           },
                         ),
-                        const SizedBox(height: 16),
-                        DropdownButtonFormField<AutoDeletePlayedPolicy>(
-                          isExpanded: true,
-                          initialValue: settings.autoDeletePlayed,
-                          decoration: const InputDecoration(
-                            labelText: 'Auto-Delete Played Episodes',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.auto_delete_outlined),
-                          ),
-                          items: AutoDeletePlayedPolicy.values.map((pol) {
-                            return DropdownMenuItem(value: pol, child: Text(pol.label));
-                          }).toList(),
-                          onChanged: (val) {
-                            if (val != null) settingsNotifier.setAutoDeletePlayed(val);
-                          },
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Auto-Delete Episode After Play'),
+                          subtitle: const Text('Automatically delete downloaded episode when playback finishes'),
+                          value: settings.autoDeleteAfterPlay,
+                          onChanged: (val) => settingsNotifier.setAutoDeleteAfterPlay(val),
                         ),
+                        if (settings.autoDeleteAfterPlay) ...[
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<AutoDeletePlayedPolicy>(
+                            isExpanded: true,
+                            initialValue: settings.autoDeletePlayed,
+                            decoration: const InputDecoration(
+                              labelText: 'Auto-Delete Cleanup Schedule',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.auto_delete_outlined),
+                            ),
+                            items: AutoDeletePlayedPolicy.values.map((pol) {
+                              return DropdownMenuItem(value: pol, child: Text(pol.label));
+                            }).toList(),
+                            onChanged: (val) {
+                              if (val != null) settingsNotifier.setAutoDeletePlayed(val);
+                            },
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         DropdownButtonFormField<int>(
                           isExpanded: true,
@@ -432,11 +442,54 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         ),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('Auto-Download New Episodes'),
-                          subtitle: const Text('Automatically download newly published episodes when feeds update'),
+                          title: const Text('Auto-Download Last Episodes'),
+                          subtitle: const Text('Automatically download the last N episodes of every subscription'),
                           value: settings.autoDownloadNewEpisodes,
                           onChanged: (val) => settingsNotifier.setAutoDownloadNewEpisodes(val),
                         ),
+                        if (settings.autoDownloadNewEpisodes) ...[
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<int>(
+                            isExpanded: true,
+                            initialValue: settings.autoDownloadMaxPerShow,
+                            decoration: const InputDecoration(
+                              labelText: 'Episodes Per Subscription to Keep Downloaded',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.downloading_outlined),
+                            ),
+                            items: const [
+                              DropdownMenuItem(value: 1, child: Text('Latest 1 episode')),
+                              DropdownMenuItem(value: 2, child: Text('Latest 2 episodes')),
+                              DropdownMenuItem(value: 3, child: Text('Latest 3 episodes (Default)')),
+                              DropdownMenuItem(value: 5, child: Text('Latest 5 episodes')),
+                              DropdownMenuItem(value: 10, child: Text('Latest 10 episodes')),
+                            ],
+                            onChanged: (val) {
+                              if (val != null) settingsNotifier.setAutoDownloadMaxPerShow(val);
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          OutlinedButton.icon(
+                            onPressed: () async {
+                              final count = await ref.read(episodeDownloadServiceProvider).autoDownloadSubscriptions(
+                                maxEpisodesPerSubscription: settings.autoDownloadMaxPerShow,
+                              );
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      count > 0
+                                          ? 'Queued $count episode${count == 1 ? '' : 's'} for download across subscriptions'
+                                          : 'All subscription episodes are already up to date',
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                            icon: const Icon(Icons.sync),
+                            label: const Text('Download Latest Episodes Now'),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -707,6 +760,13 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           subtitle: const Text('Trim conversational pauses dynamically without pitch change'),
                           value: settings.skipSilence,
                           onChanged: (val) => settingsNotifier.setSkipSilence(val),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Auto-Delete Episode After Play'),
+                          subtitle: const Text('Automatically remove downloaded audio file when playback completes'),
+                          value: settings.autoDeleteAfterPlay,
+                          onChanged: (val) => settingsNotifier.setAutoDeleteAfterPlay(val),
                         ),
                       ],
                     ),

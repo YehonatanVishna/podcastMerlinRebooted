@@ -64,6 +64,7 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
         audioHandler.setAutoFocusAction(loaded.audioFocusLossAction);
         audioHandler.setSleepTimerFadeDuration(loaded.sleepTimerFadeOutSeconds);
         audioHandler.setSkipSilence(loaded.skipSilence);
+        audioHandler.setAutoDeleteAfterPlay(loaded.autoDeleteAfterPlay);
       } catch (_) {}
     } catch (e) {
       if (kDebugMode) print('Failed loading app settings: $e');
@@ -90,6 +91,7 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
       audioHandler.setAutoFocusAction(settings.audioFocusLossAction);
       audioHandler.setSleepTimerFadeDuration(settings.sleepTimerFadeOutSeconds);
       audioHandler.setSkipSilence(settings.skipSilence);
+      audioHandler.setAutoDeleteAfterPlay(settings.autoDeleteAfterPlay);
     } catch (_) {}
 
     try {
@@ -145,9 +147,25 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
 
   void setDownloadWifiOnly(bool wifiOnly) => updateSettings(state.copyWith(downloadWifiOnly: wifiOnly));
   void setMaxConcurrentDownloads(int max) => updateSettings(state.copyWith(maxConcurrentDownloads: max));
-  void setAutoDeletePlayed(AutoDeletePlayedPolicy policy) => updateSettings(state.copyWith(autoDeletePlayed: policy));
+  void setAutoDeletePlayed(AutoDeletePlayedPolicy policy) => updateSettings(state.copyWith(
+    autoDeletePlayed: policy,
+    autoDeleteAfterPlay: policy != AutoDeletePlayedPolicy.never,
+  ));
+  void setAutoDeleteAfterPlay(bool enabled) {
+    final newPolicy = enabled
+        ? (state.autoDeletePlayed == AutoDeletePlayedPolicy.never
+            ? AutoDeletePlayedPolicy.immediately
+            : state.autoDeletePlayed)
+        : AutoDeletePlayedPolicy.never;
+    updateSettings(state.copyWith(
+      autoDeleteAfterPlay: enabled,
+      autoDeletePlayed: newPolicy,
+    ));
+  }
   void setAutoDownloadNewEpisodes(bool auto) => updateSettings(state.copyWith(autoDownloadNewEpisodes: auto));
   void setAutoDownloadMaxPerShow(int max) => updateSettings(state.copyWith(autoDownloadMaxPerShow: max));
+  void setAutoDownloadLastNEpisodes(bool auto) => setAutoDownloadNewEpisodes(auto);
+  void setAutoDownloadEpisodesPerShow(int max) => setAutoDownloadMaxPerShow(max);
   void setMaxStorageQuotaGb(int quota) => updateSettings(state.copyWith(maxStorageQuotaGb: quota));
   void setCustomDownloadPath(String? path) => updateSettings(state.copyWith(
     customDownloadPath: path,

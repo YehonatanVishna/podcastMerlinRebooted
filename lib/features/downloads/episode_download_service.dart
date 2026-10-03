@@ -723,6 +723,75 @@ class EpisodeDownloadService {
     }
   }
 
+  /// Automatically downloads the latest [maxEpisodesPerSubscription] episodes for every subscribed podcast.
+  /// Skips episodes that are already downloaded, currently active, or queued.
+  /// If [onlyUnplayed] is true, only unplayed episodes will be downloaded.
+  Future<int> autoDownloadSubscriptions({
+    int? maxEpisodesPerSubscription,
+    bool onlyUnplayed = true,
+  }) async {
+    final maxPerShow = maxEpisodesPerSubscription ?? 3;
+    if (maxPerShow <= 0) return 0;
+
+    int queuedCount = 0;
+    try {
+      final podcasts = await _db.getAllPodcasts();
+      for (final pod in podcasts) {
+        if (pod.id == null) continue;
+        final episodes = await _db.getEpisodesForPodcast(
+          pod.id!,
+          limit: maxPerShow,
+          sortDescending: true,
+          filter: onlyUnplayed ? EpisodeFilter.unplayed : EpisodeFilter.all,
+        );
+        for (final ep in episodes) {
+          final epId = ep.id;
+          if (epId == null) continue;
+          if (ep.isDownloaded || isEpisodeActive(epId) || isEpisodeQueued(epId)) {
+            continue;
+          }
+          await startDownload(ep);
+          queuedCount++;
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) print('Error during autoDownloadSubscriptions: $e');
+    }
+    return queuedCount;
+  }
+
+  /// Automatically downloads the latest [maxEpisodes] for a specific podcast.
+  Future<int> autoDownloadForPodcast(
+    int podcastId, {
+    int? maxEpisodes,
+    bool onlyUnplayed = true,
+  }) async {
+    final maxEpisodesToFetch = maxEpisodes ?? 3;
+    if (maxEpisodesToFetch <= 0) return 0;
+
+    int queuedCount = 0;
+    try {
+      final episodes = await _db.getEpisodesForPodcast(
+        podcastId,
+        limit: maxEpisodesToFetch,
+        sortDescending: true,
+        filter: onlyUnplayed ? EpisodeFilter.unplayed : EpisodeFilter.all,
+      );
+      for (final ep in episodes) {
+        final epId = ep.id;
+        if (epId == null) continue;
+        if (ep.isDownloaded || isEpisodeActive(epId) || isEpisodeQueued(epId)) {
+          continue;
+        }
+        await startDownload(ep);
+        queuedCount++;
+      }
+    } catch (e) {
+      if (kDebugMode) print('Error during autoDownloadForPodcast: $e');
+    }
+    return queuedCount;
+  }
+
   Future<void> pauseDownload(int episodeId) async {
     _pausedEpisodeIds.add(episodeId);
     if (_activeDownloads.containsKey(episodeId)) {

@@ -751,6 +751,87 @@ void main() {
       final epList = await db.getDownloadedEpisodes();
       expect(epList.first.downloadedBytes, 20);
     });
+
+    test('autoDownloadSubscriptions downloads the latest N unplayed episodes across subscriptions', () async {
+      final podId = await db.insertOrUpdatePodcast(
+        Podcast(
+          rssUrl: 'https://example.com/autodl_sub.xml',
+          title: 'AutoDL Show',
+          description: '',
+          imageUrl: '',
+          link: '',
+          lastUpdated: DateTime.now(),
+        ),
+      );
+
+      final now = DateTime.now();
+      final ep1 = Episode(
+        podcastId: podId,
+        guid: 'autodl_1',
+        title: 'AutoDL Ep 1 (oldest)',
+        mediaUrl: '$serverUrl/sample.mp3?ep=1',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_sub.xml',
+        publishedAt: now.subtract(const Duration(days: 3)),
+      );
+      final ep2 = Episode(
+        podcastId: podId,
+        guid: 'autodl_2',
+        title: 'AutoDL Ep 2',
+        mediaUrl: '$serverUrl/sample.mp3?ep=2',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_sub.xml',
+        publishedAt: now.subtract(const Duration(days: 2)),
+      );
+      final ep3 = Episode(
+        podcastId: podId,
+        guid: 'autodl_3',
+        title: 'AutoDL Ep 3 (newest)',
+        mediaUrl: '$serverUrl/sample.mp3?ep=3',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_sub.xml',
+        publishedAt: now.subtract(const Duration(days: 1)),
+      );
+
+      await db.insertEpisodes([ep1, ep2, ep3]);
+
+      // Request auto-downloading the last 2 episodes of every subscription
+      final queuedCount = await service.autoDownloadSubscriptions(maxEpisodesPerSubscription: 2);
+      expect(queuedCount, 2);
+
+      // Re-invoking should queue 0 because they are already active or queued
+      final secondRun = await service.autoDownloadSubscriptions(maxEpisodesPerSubscription: 2);
+      expect(secondRun, 0);
+
+      // Test autoDownloadForPodcast for specific podcast
+      final pod2Id = await db.insertOrUpdatePodcast(
+        Podcast(
+          rssUrl: 'https://example.com/autodl_single.xml',
+          title: 'AutoDL Single Show',
+          description: '',
+          imageUrl: '',
+          link: '',
+          lastUpdated: DateTime.now(),
+        ),
+      );
+      final singleEp = Episode(
+        podcastId: pod2Id,
+        guid: 'autodl_single_1',
+        title: 'AutoDL Single Ep 1',
+        mediaUrl: '$serverUrl/sample.mp3?ep=single1',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_single.xml',
+        publishedAt: now,
+      );
+      await db.insertEpisodes([singleEp]);
+
+      final singleQueued = await service.autoDownloadForPodcast(pod2Id, maxEpisodes: 1);
+      expect(singleQueued, 1);
+    });
   });
 
   group('AudioPlayerService Offline Playback Resolution', () {
