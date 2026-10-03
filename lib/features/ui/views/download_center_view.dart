@@ -28,6 +28,7 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
   final Set<int> _selectedEpisodeIds = <int>{};
   bool _isFailedSelectionMode = false;
   final Set<int> _selectedFailedIds = <int>{};
+  bool _isBatchOperating = false;
   final Map<int, Episode> _episodeMetaCache = {};
 
   Future<void> _loadEpisodeMeta(int episodeId) async {
@@ -664,83 +665,43 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
     return Column(
       children: [
         if (_isSelectionMode)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            margin: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.2)),
-            ),
-            child: Row(
-              children: [
-                Checkbox(
-                  tristate: true,
-                  value: allSelected
-                      ? true
-                      : (_selectedEpisodeIds.isNotEmpty ? null : false),
-                  onChanged: (val) {
-                    setState(() {
-                      if (allSelected) {
-                        _selectedEpisodeIds.clear();
-                      } else {
-                        _selectedEpisodeIds.addAll(
-                          episodes.where((e) => e.id != null).map((e) => e.id!),
-                        );
-                      }
-                    });
-                  },
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${_selectedEpisodeIds.length} of ${episodes.length} selected',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                      ),
-                      if (selectedBytes > 0)
-                        Text(
-                          _formatBytes(selectedBytes),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.colorScheme.primary,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                FilledButton.tonalIcon(
-                  style: FilledButton.styleFrom(
-                    foregroundColor: theme.colorScheme.error,
-                    backgroundColor: theme.colorScheme.errorContainer.withValues(alpha: 0.5),
-                  ),
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  label: Text(
-                    _selectedEpisodeIds.isEmpty
-                        ? 'Delete'
-                        : 'Delete (${_selectedEpisodeIds.length})',
-                  ),
-                  onPressed: _selectedEpisodeIds.isEmpty
-                      ? null
-                      : () => _confirmDeleteSelected(context, episodes, service),
-                ),
-                const SizedBox(width: 6),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 20),
-                  tooltip: 'Cancel selection',
-                  onPressed: () {
-                    setState(() {
-                      _isSelectionMode = false;
-                      _selectedEpisodeIds.clear();
-                    });
-                  },
-                ),
-              ],
-            ),
+          _BatchSelectionBar(
+            allSelected: allSelected
+                ? true
+                : (_selectedEpisodeIds.isNotEmpty ? null : false),
+            onSelectAllChanged: (val) {
+              setState(() {
+                if (allSelected) {
+                  _selectedEpisodeIds.clear();
+                } else {
+                  _selectedEpisodeIds.addAll(
+                    episodes.where((e) => e.id != null).map((e) => e.id!),
+                  );
+                }
+              });
+            },
+            title: '${_selectedEpisodeIds.length} of ${episodes.length} selected',
+            subtitle: selectedBytes > 0 ? _formatBytes(selectedBytes) : null,
+            actions: [
+              _BatchActionItem(
+                icon: Icons.delete_outline,
+                label: _selectedEpisodeIds.isEmpty
+                    ? 'Delete'
+                    : 'Delete (${_selectedEpisodeIds.length})',
+                tooltip: 'Delete selected',
+                foregroundColor: theme.colorScheme.error,
+                backgroundColor: theme.colorScheme.errorContainer.withValues(alpha: 0.5),
+                onPressed: _selectedEpisodeIds.isEmpty || _isBatchOperating
+                    ? null
+                    : () => _confirmDeleteSelected(context, episodes, service),
+              ),
+            ],
+            onCancel: () {
+              setState(() {
+                _isSelectionMode = false;
+                _selectedEpisodeIds.clear();
+              });
+            },
           )
         else
           Padding(
@@ -1000,23 +961,30 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
     );
 
     if (confirmed == true && mounted) {
-      final deleted = await service.deleteMultipleDownloads(toDelete);
-      if (!mounted) return;
-      ref.invalidate(downloadStorageUsageBytesProvider);
-      ref.invalidate(downloadedEpisodesListProvider);
-      ref.invalidate(downloadedEpisodesCountProvider);
-      setState(() {
-        _selectedEpisodeIds.clear();
-        _isSelectionMode = false;
-      });
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Deleted $deleted downloaded ${deleted == 1 ? 'file' : 'files'} ($sizeStr freed)',
+      setState(() => _isBatchOperating = true);
+      try {
+        final deleted = await service.deleteMultipleDownloads(toDelete);
+        if (!mounted) return;
+        ref.invalidate(downloadStorageUsageBytesProvider);
+        ref.invalidate(downloadedEpisodesListProvider);
+        ref.invalidate(downloadedEpisodesCountProvider);
+        setState(() {
+          _selectedEpisodeIds.clear();
+          _isSelectionMode = false;
+        });
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Deleted $deleted downloaded ${deleted == 1 ? 'file' : 'files'} ($sizeStr freed)',
+              ),
             ),
-          ),
-        );
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() => _isBatchOperating = false);
+        }
       }
     }
   }
@@ -1059,70 +1027,66 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
     return Column(
       children: [
         if (_isFailedSelectionMode)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            margin: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.2)),
-            ),
-            child: Row(
-              children: [
-                Checkbox(
-                  tristate: true,
-                  value: allFailedSelected
-                      ? true
-                      : (_selectedFailedIds.isNotEmpty ? null : false),
-                  onChanged: (val) {
-                    setState(() {
-                      if (allFailedSelected) {
-                        _selectedFailedIds.clear();
-                      } else {
-                        _selectedFailedIds.addAll(
-                          failedEpisodes.where((e) => e.id != null).map((e) => e.id!),
-                        );
-                      }
-                    });
-                  },
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '${_selectedFailedIds.length} of ${failedEpisodes.length} selected',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                ),
-                FilledButton.tonalIcon(
-                  icon: const Icon(Icons.replay, size: 16),
-                  label: Text('Retry (${_selectedFailedIds.length})'),
-                  onPressed: _selectedFailedIds.isEmpty
-                      ? null
-                      : () async {
+          _BatchSelectionBar(
+            allSelected: allFailedSelected
+                ? true
+                : (_selectedFailedIds.isNotEmpty ? null : false),
+            onSelectAllChanged: (val) {
+              setState(() {
+                if (allFailedSelected) {
+                  _selectedFailedIds.clear();
+                } else {
+                  _selectedFailedIds.addAll(
+                    failedEpisodes.where((e) => e.id != null).map((e) => e.id!),
+                  );
+                }
+              });
+            },
+            title: '${_selectedFailedIds.length} of ${failedEpisodes.length} selected',
+            actions: [
+              _BatchActionItem(
+                icon: Icons.replay,
+                label: _selectedFailedIds.isEmpty
+                    ? 'Retry'
+                    : 'Retry (${_selectedFailedIds.length})',
+                tooltip: 'Retry selected',
+                onPressed: _selectedFailedIds.isEmpty || _isBatchOperating
+                    ? null
+                    : () async {
+                        setState(() => _isBatchOperating = true);
+                        try {
                           final toRetry = failedEpisodes
                               .where((e) => e.id != null && _selectedFailedIds.contains(e.id))
                               .toList();
                           for (final ep in toRetry) {
                             await service.retryFailed(ep);
                           }
+                          if (!mounted) return;
                           ref.invalidate(failedEpisodesListProvider);
                           setState(() {
                             _selectedFailedIds.clear();
                             _isFailedSelectionMode = false;
                           });
-                        },
-                ),
-                const SizedBox(width: 6),
-                FilledButton.tonalIcon(
-                  style: FilledButton.styleFrom(
-                    foregroundColor: theme.colorScheme.error,
-                    backgroundColor: theme.colorScheme.errorContainer.withValues(alpha: 0.5),
-                  ),
-                  icon: const Icon(Icons.delete_outline, size: 16),
-                  label: Text('Dismiss (${_selectedFailedIds.length})'),
-                  onPressed: _selectedFailedIds.isEmpty
-                      ? null
-                      : () async {
+                        } finally {
+                          if (mounted) {
+                            setState(() => _isBatchOperating = false);
+                          }
+                        }
+                      },
+              ),
+              _BatchActionItem(
+                icon: Icons.delete_outline,
+                label: _selectedFailedIds.isEmpty
+                    ? 'Dismiss'
+                    : 'Dismiss (${_selectedFailedIds.length})',
+                tooltip: 'Dismiss selected',
+                foregroundColor: theme.colorScheme.error,
+                backgroundColor: theme.colorScheme.errorContainer.withValues(alpha: 0.5),
+                onPressed: _selectedFailedIds.isEmpty || _isBatchOperating
+                    ? null
+                    : () async {
+                        setState(() => _isBatchOperating = true);
+                        try {
                           final toDismiss = failedEpisodes
                               .where((e) => e.id != null && _selectedFailedIds.contains(e.id))
                               .toList();
@@ -1131,26 +1095,26 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
                               await DatabaseHelper.instance.clearEpisodeDownload(ep.id!);
                             }
                           }
+                          if (!mounted) return;
                           ref.invalidate(failedEpisodesListProvider);
                           setState(() {
                             _selectedFailedIds.clear();
                             _isFailedSelectionMode = false;
                           });
-                        },
-                ),
-                const SizedBox(width: 6),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 20),
-                  tooltip: 'Cancel selection',
-                  onPressed: () {
-                    setState(() {
-                      _isFailedSelectionMode = false;
-                      _selectedFailedIds.clear();
-                    });
-                  },
-                ),
-              ],
-            ),
+                        } finally {
+                          if (mounted) {
+                            setState(() => _isBatchOperating = false);
+                          }
+                        }
+                      },
+              ),
+            ],
+            onCancel: () {
+              setState(() {
+                _isFailedSelectionMode = false;
+                _selectedFailedIds.clear();
+              });
+            },
           )
         else
           Padding(
@@ -1333,3 +1297,134 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
     }
   }
 }
+
+class _BatchActionItem {
+  final IconData icon;
+  final String label;
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final Color? foregroundColor;
+  final Color? backgroundColor;
+
+  const _BatchActionItem({
+    required this.icon,
+    required this.label,
+    required this.tooltip,
+    required this.onPressed,
+    this.foregroundColor,
+    this.backgroundColor,
+  });
+}
+
+class _BatchSelectionBar extends StatelessWidget {
+  final bool? allSelected;
+  final ValueChanged<bool?> onSelectAllChanged;
+  final String title;
+  final String? subtitle;
+  final List<_BatchActionItem> actions;
+  final VoidCallback onCancel;
+
+  const _BatchSelectionBar({
+    required this.allSelected,
+    required this.onSelectAllChanged,
+    required this.title,
+    this.subtitle,
+    required this.actions,
+    required this.onCancel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.2)),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final textScale = MediaQuery.textScalerOf(context).scale(1);
+          final isNarrow = constraints.maxWidth < (440 * textScale);
+          return Row(
+            children: [
+              Checkbox(
+                tristate: true,
+                value: allSelected,
+                visualDensity: VisualDensity.compact,
+                onChanged: onSelectAllChanged,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    if (subtitle != null)
+                      Text(
+                        subtitle!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              for (final action in actions) ...[
+                if (isNarrow)
+                  IconButton.filledTonal(
+                    style: action.backgroundColor != null || action.foregroundColor != null
+                        ? IconButton.styleFrom(
+                            backgroundColor: action.backgroundColor,
+                            foregroundColor: action.foregroundColor,
+                          )
+                        : null,
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(action.icon, size: 18),
+                    tooltip: action.tooltip,
+                    onPressed: action.onPressed,
+                  )
+                else
+                  Tooltip(
+                    message: action.tooltip,
+                    child: FilledButton.tonalIcon(
+                      style: FilledButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                        foregroundColor: action.foregroundColor,
+                        backgroundColor: action.backgroundColor,
+                      ),
+                      icon: Icon(action.icon, size: 16),
+                      label: Text(action.label),
+                      onPressed: action.onPressed,
+                    ),
+                  ),
+                const SizedBox(width: 4),
+              ],
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.close, size: 18),
+                tooltip: 'Cancel selection',
+                onPressed: onCancel,
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+

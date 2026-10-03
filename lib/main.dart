@@ -100,13 +100,16 @@ class PodcastMerlinApp extends ConsumerWidget {
           themeSettings.useDynamicColor ? darkDynamic : null,
         );
 
-        // The Android home screen widget card has a fixed dark surface (#211F2E),
-        // so it always syncs darkTheme's harmonized primary/onPrimary accents
-        // for optimal contrast and readability regardless of app ThemeMode.
+        // Sync darkTheme's harmonized primary/onPrimary accents to the home screen widget.
+        // When dynamic colors are enabled, surfaceColor is omitted so Android 12+ natively
+        // applies system_accent2_800 wallpaper-tinted background matching the YouTube widget.
         WidgetsBinding.instance.addPostFrameCallback((_) {
           PodcastWidgetService.instance.updateThemeColors(
             primaryColor: darkTheme.colorScheme.primary,
             onPrimaryColor: darkTheme.colorScheme.onPrimary,
+            surfaceColor: themeSettings.useDynamicColor
+                ? null
+                : darkTheme.colorScheme.surfaceContainer,
           );
         });
 

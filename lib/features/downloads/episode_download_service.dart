@@ -77,6 +77,7 @@ class EpisodeDownloadService {
               BaseOptions(
                 connectTimeout: const Duration(seconds: 30),
                 receiveTimeout: const Duration(minutes: 10),
+                maxRedirects: 15,
               ),
             ),
         _customDirResolver = downloadDirResolver;
@@ -292,6 +293,7 @@ class EpisodeDownloadService {
             options: Options(
               responseType: ResponseType.stream,
               headers: headers.isNotEmpty ? headers : null,
+              maxRedirects: 15,
               validateStatus: (status) =>
                   status != null && ((status >= 200 && status < 300) || status == 416),
             ),

@@ -23,6 +23,7 @@ class PodcastWidgetService {
   MediaItem? _lastItem;
   int? _lastPrimaryColor;
   int? _lastOnPrimaryColor;
+  int? _lastSurfaceColor;
   DateTime _lastPositionUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   bool _isUpdating = false;
   bool _hasPendingUpdate = false;
@@ -111,27 +112,40 @@ class PodcastWidgetService {
     }
   }
 
-  /// Updates the home screen widget accent theme colors based on the app's active color scheme.
+  /// Updates the home screen widget theme colors based on the app's active color scheme.
   Future<void> updateThemeColors({
     required Color primaryColor,
     required Color onPrimaryColor,
+    Color? surfaceColor,
   }) async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
 
     final pVal = primaryColor.toARGB32().toSigned(32);
     final opVal = onPrimaryColor.toARGB32().toSigned(32);
+    final sVal = surfaceColor?.toARGB32().toSigned(32);
 
-    if (_lastPrimaryColor == pVal && _lastOnPrimaryColor == opVal) return;
+    if (_lastPrimaryColor == pVal &&
+        _lastOnPrimaryColor == opVal &&
+        _lastSurfaceColor == sVal) {
+      return;
+    }
+
+    _lastPrimaryColor = pVal;
+    _lastOnPrimaryColor = opVal;
+    _lastSurfaceColor = sVal;
 
     try {
-      await Future.wait([
+      final futures = <Future>[
         HomeWidget.saveWidgetData<int>('widget_color_primary', pVal),
         HomeWidget.saveWidgetData<int>('widget_color_on_primary', opVal),
-      ]);
+        HomeWidget.saveWidgetData<int?>('widget_color_surface', sVal),
+      ];
+      await Future.wait(futures);
       await _updateWidget();
-      _lastPrimaryColor = pVal;
-      _lastOnPrimaryColor = opVal;
     } catch (e) {
+      _lastPrimaryColor = null;
+      _lastOnPrimaryColor = null;
+      _lastSurfaceColor = null;
       if (kDebugMode) {
         print('PodcastWidgetService updateThemeColors error: $e');
       }
@@ -190,10 +204,14 @@ class PodcastWidgetService {
           artworkPath = await ImageCacheService.getCachedFilePath(url);
           if (artworkPath == null && url.startsWith('http')) {
             // Trigger background download and cache so subsequent widget update displays it
-            unawaited(ImageCacheService.downloadAndCache(url).then((file) {
+            unawaited(ImageCacheService.downloadAndCache(url).then((file) async {
               if (file != null && _lastItem?.artUri?.toString() == url) {
-                HomeWidget.saveWidgetData<String>('widget_artwork_path', file.path);
-                _updateWidget();
+                await HomeWidget.saveWidgetData<String>('widget_artwork_path', file.path);
+                await _updateWidget();
+              }
+            }).catchError((e) {
+              if (kDebugMode) {
+                print('PodcastWidgetService artwork background download error: $e');
               }
             }));
           }
@@ -227,6 +245,7 @@ class PodcastWidgetService {
     _lastItem = null;
     _lastPrimaryColor = null;
     _lastOnPrimaryColor = null;
+    _lastSurfaceColor = null;
     _isUpdating = false;
     _hasPendingUpdate = false;
   }

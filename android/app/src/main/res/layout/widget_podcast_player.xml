@@ -3,6 +3,7 @@
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:theme="@android:style/Theme.DeviceDefault.DayNight"
     android:background="@drawable/widget_background"
     android:paddingStart="12dp"
     android:paddingEnd="12dp"
