@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../../core/theme/theme_provider.dart';
 import '../../sync/opml_ui_helper.dart';
 import '../../sync/secure_storage_service.dart';
 import '../widgets/sync_error_banner.dart';
@@ -432,6 +433,20 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 const Divider(),
                 const SizedBox(height: 16),
                 const Text(
+                  'Appearance',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Customize the theme mode and dynamic system colors across your devices.',
+                  style: TextStyle(color: Colors.grey),
+                ),
+                const SizedBox(height: 16),
+                _buildAppearanceCard(context),
+                const SizedBox(height: 24),
+                const Divider(),
+                const SizedBox(height: 16),
+                const Text(
                   'Playback & Seek Controls',
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
@@ -722,5 +737,72 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
         );
       }
     }
+  }
+
+  Widget _buildAppearanceCard(BuildContext context) {
+    final themeSettings = ref.watch(themeSettingsProvider);
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Theme.of(context).dividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Theme Mode',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<ThemeMode>(
+                segments: const [
+                  ButtonSegment<ThemeMode>(
+                    value: ThemeMode.system,
+                    label: Text('System'),
+                    icon: Icon(Icons.brightness_auto),
+                  ),
+                  ButtonSegment<ThemeMode>(
+                    value: ThemeMode.light,
+                    label: Text('Light'),
+                    icon: Icon(Icons.light_mode),
+                  ),
+                  ButtonSegment<ThemeMode>(
+                    value: ThemeMode.dark,
+                    label: Text('Dark'),
+                    icon: Icon(Icons.dark_mode),
+                  ),
+                ],
+                selected: {themeSettings.themeMode},
+                onSelectionChanged: (newSelection) {
+                  if (newSelection.isNotEmpty) {
+                    ref.read(themeSettingsProvider.notifier).setThemeMode(newSelection.first);
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Divider(),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.color_lens_outlined),
+              title: const Text('Use system theme color'),
+              subtitle: const Text(
+                'Adapts brand and accent colors to your OS system theme or wallpaper (Android 12+, Windows, macOS, Linux).',
+              ),
+              value: themeSettings.useDynamicColor,
+              onChanged: (val) {
+                ref.read(themeSettingsProvider.notifier).setUseDynamicColor(val);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

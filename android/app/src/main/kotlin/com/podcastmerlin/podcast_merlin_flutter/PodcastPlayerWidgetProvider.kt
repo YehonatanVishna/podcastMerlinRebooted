@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -63,7 +64,66 @@ class PodcastPlayerWidgetProvider : HomeWidgetProvider() {
                 val progress = widgetData.getInt("widget_progress", 0)
                 setProgressBar(R.id.widget_progress_bar, 100, progress.coerceIn(0, 100), false)
 
-                // Artwork
+                // Dynamic theme colors (accent & surface colors)
+                val defaultPrimary = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    context.getColor(android.R.color.system_accent1_200)
+                } else {
+                    0xFFD0BCFF.toInt()
+                }
+                val defaultOnPrimary = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    context.getColor(android.R.color.system_accent1_900)
+                } else {
+                    0xFF381E72.toInt()
+                }
+                val defaultSurface = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    context.getColor(android.R.color.system_accent2_800)
+                } else {
+                    context.getColor(R.color.widget_background_color)
+                }
+
+                val primaryColor =
+                    (widgetData.all["widget_color_primary"] as? Number)?.toInt() ?: defaultPrimary
+                val onPrimaryColor =
+                    (widgetData.all["widget_color_on_primary"] as? Number)?.toInt() ?: defaultOnPrimary
+                val rawSurface = (widgetData.all["widget_color_surface"] as? Number)?.toInt()
+
+                // Honor explicit surface color if passed from Flutter; otherwise use defaultSurface
+                // (which maps to system_accent2_800 wallpaper tint on Android 12+)
+                val surfaceColor = rawSurface ?: defaultSurface
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setColorStateList(
+                        R.id.widget_root,
+                        "setBackgroundTintList",
+                        ColorStateList.valueOf(surfaceColor)
+                    )
+                    setColorStateList(
+                        R.id.widget_btn_play_pause,
+                        "setBackgroundTintList",
+                        ColorStateList.valueOf(primaryColor)
+                    )
+                    setColorStateList(
+                        R.id.widget_btn_play_pause,
+                        "setImageTintList",
+                        ColorStateList.valueOf(onPrimaryColor)
+                    )
+                    setColorStateList(
+                        R.id.widget_progress_bar,
+                        "setProgressTintList",
+                        ColorStateList.valueOf(primaryColor)
+                    )
+                    // The spinner renders inside the primaryColor play/pause circle,
+                    // so onPrimaryColor provides high contrast against the circular background.
+                    setColorStateList(
+                        R.id.widget_buffering_spinner,
+                        "setIndeterminateTintList",
+                        ColorStateList.valueOf(onPrimaryColor)
+                    )
+                } else {
+                    setInt(R.id.widget_btn_play_pause, "setColorFilter", onPrimaryColor)
+                }
+
+                // Artwork & Placeholder
                 val artworkPath = widgetData.getString("widget_artwork_path", null)
                 var loadedBitmap: Bitmap? = null
                 if (!artworkPath.isNullOrEmpty()) {
@@ -71,6 +131,11 @@ class PodcastPlayerWidgetProvider : HomeWidgetProvider() {
                     if (file.exists()) {
                         loadedBitmap = loadScaledBitmap(file.absolutePath, 256)
                     }
+                }
+
+                // Ensure any previous setImageTintList is cleared on API >= 31
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setColorStateList(R.id.widget_artwork, "setImageTintList", null)
                 }
 
                 if (loadedBitmap != null) {
@@ -82,7 +147,13 @@ class PodcastPlayerWidgetProvider : HomeWidgetProvider() {
                     }
                     setImageViewBitmap(R.id.widget_artwork, rounded)
                 } else {
-                    setImageViewResource(R.id.widget_artwork, R.drawable.ic_widget_placeholder)
+                    val sizePx = (54 * context.resources.displayMetrics.density).toInt().coerceAtLeast(108)
+                    val placeholderBitmap = getTintedPlaceholderBitmap(context, primaryColor, sizePx)
+                    if (placeholderBitmap != null) {
+                        setImageViewBitmap(R.id.widget_artwork, placeholderBitmap)
+                    } else {
+                        setImageViewResource(R.id.widget_artwork, R.drawable.ic_widget_placeholder)
+                    }
                 }
 
                 // Action buttons: MediaButton PendingIntents to AudioService MediaButtonReceiver
@@ -141,6 +212,20 @@ class PodcastPlayerWidgetProvider : HomeWidgetProvider() {
                 cropped
             }
             scaled
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun getTintedPlaceholderBitmap(context: Context, tintColor: Int, sizePx: Int): Bitmap? {
+        return try {
+            val drawable = context.getDrawable(R.drawable.ic_widget_placeholder)?.mutate() ?: return null
+            val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            drawable.setBounds(0, 0, sizePx, sizePx)
+            drawable.setTint(tintColor)
+            drawable.draw(canvas)
+            bitmap
         } catch (e: Exception) {
             null
         }

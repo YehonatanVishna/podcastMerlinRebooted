@@ -24,3 +24,26 @@ plugins {
 }
 
 include(":app")
+
+// Workaround for AGP 9 / Gradle 9 compatibility with home_widget (0.7.0):
+// home_widget's build.gradle uses legacy `apply plugin: 'kotlin-android'`, which fails
+// under Gradle 9.0+ / AGP 9.0+. We dynamically patch it to use `pluginManager.apply('kotlin-android')`.
+// TODO(upstream): Remove once home_widget releases an AGP 9-compatible update.
+findProject(":home_widget")?.let { hwProject ->
+    val buildFile = File(hwProject.projectDir, "build.gradle")
+    if (buildFile.exists()) {
+        try {
+            val content = buildFile.readText()
+            if (content.contains("apply plugin: 'kotlin-android'")) {
+                buildFile.writeText(
+                    content.replace(
+                        "apply plugin: 'kotlin-android'",
+                        "pluginManager.apply('kotlin-android')"
+                    )
+                )
+            }
+        } catch (_: Exception) {
+            // Ignore if pub cache is read-only
+        }
+    }
+}
