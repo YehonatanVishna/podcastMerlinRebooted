@@ -3,7 +3,6 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/services/image_cache_service.dart';
-import '../../../core/theme/theme_provider.dart';
 import '../../sync/opml_ui_helper.dart';
 import '../../sync/secure_storage_service.dart';
 import '../widgets/sync_error_banner.dart';
@@ -31,6 +30,11 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   bool _isSuccessStatus = false;
   int? _imageCacheBytes;
 
+  bool _isClearingCache = false;
+  bool _isAutoDownloading = false;
+  bool _isClearingDownloads = false;
+  double? _dragPlaybackSpeed;
+
   @override
   void initState() {
     super.initState();
@@ -38,6 +42,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   }
 
   Future<void> _loadSavedCredentials() async {
+    await ref.read(appSettingsProvider.notifier).ensureLoaded();
     final storage = ref.read(secureStorageProvider);
     final settings = ref.read(appSettingsProvider);
 
@@ -82,7 +87,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     super.dispose();
   }
 
-  Future<void> _saveCredentials() async {
+  Future<void> _saveNextcloudCredentials() async {
     final storage = ref.read(secureStorageProvider);
     final oldServer = await storage.read(SecureStorageService.keyServerUrl) ?? '';
     final oldUser = await storage.read(SecureStorageService.keyUsername) ?? '';
@@ -98,6 +103,14 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     await storage.write(SecureStorageService.keyUsername, newUser);
     await storage.write(SecureStorageService.keyPassword, _passwordController.text.trim());
 
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nextcloud credentials saved')),
+      );
+    }
+  }
+
+  Future<void> _saveDiscoverySettings() async {
     final settingsNotifier = ref.read(appSettingsProvider.notifier);
     settingsNotifier.setPodcastIndexCredentials(
       _podcastIndexKeyController.text.trim(),
@@ -107,6 +120,16 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       settingsNotifier.setDeviceId(_deviceIdController.text.trim());
     }
 
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('API Keys & Device ID saved')),
+      );
+    }
+  }
+
+  Future<void> _saveCredentials() async {
+    await _saveNextcloudCredentials();
+    await _saveDiscoverySettings();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Settings saved successfully')),
@@ -152,7 +175,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final syncStatus = ref.watch(syncStatusNotifierProvider);
     final settings = ref.watch(appSettingsProvider);
     final settingsNotifier = ref.read(appSettingsProvider.notifier);
 
@@ -210,19 +232,27 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 ),
                 const SizedBox(height: 24),
 
-                if (syncStatus.error != null && !syncStatus.isSyncing) ...[
-                  SyncErrorBanner(
-                    title: 'Sync Failed',
-                    summary: 'Some sync tasks failed',
-                    errorMessage: syncStatus.error!,
-                    onDismiss: () => ref.read(syncStatusNotifierProvider.notifier).clearError(),
-                    onRetry: () => ref.read(podcastsNotifierProvider.notifier).refreshAll(),
-                  ),
-                  const SizedBox(height: 16),
-                ],
+                Consumer(
+                  builder: (context, ref, _) {
+                    final syncStatus = ref.watch(syncStatusNotifierProvider);
+                    if (syncStatus.error == null || syncStatus.isSyncing) return const SizedBox.shrink();
+                    return Column(
+                      children: [
+                        SyncErrorBanner(
+                          title: 'Sync Failed',
+                          summary: 'Some sync tasks failed',
+                          errorMessage: syncStatus.error!,
+                          onDismiss: () => ref.read(syncStatusNotifierProvider.notifier).clearError(),
+                          onRetry: () => ref.read(podcastsNotifierProvider.notifier).refreshAll(),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                    );
+                  },
+                ),
 
-                // 1. DISCOVERY & OPML
-                _buildSectionHeader('Discovery & OPML', Icons.explore_outlined),
+                // 1. APPEARANCE & INTERFACE
+                _buildSectionHeader('Appearance & Interface', Icons.palette_outlined),
                 Card(
                   elevation: 0,
                   shape: RoundedRectangleBorder(
@@ -232,103 +262,147 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                   child: Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        DropdownButtonFormField<PreferredSearchProvider>(
-                          isExpanded: true,
-                          initialValue: PreferredSearchProvider.values.contains(settings.preferredSearchProvider)
-                              ? settings.preferredSearchProvider
-                              : PreferredSearchProvider.itunes,
-                          decoration: const InputDecoration(
-                            labelText: 'Preferred Search Provider',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.travel_explore),
-                          ),
-                          items: PreferredSearchProvider.values.map((p) {
-                            return DropdownMenuItem(value: p, child: Text(p.label));
+                        Text('App Theme', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: AppThemeMode.values.map((mode) {
+                            final isSelected = settings.themeMode == mode;
+                            return ChoiceChip(
+                              label: Text(mode.label),
+                              selected: isSelected,
+                              onSelected: (_) => settingsNotifier.setThemeMode(mode),
+                            );
                           }).toList(),
-                          onChanged: (val) {
-                            if (val != null) settingsNotifier.setPreferredSearchProvider(val);
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: _podcastIndexKeyController,
-                          decoration: const InputDecoration(
-                            labelText: 'Custom Podcast Index API Key (Optional)',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.vpn_key_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _podcastIndexSecretController,
-                          obscureText: _obscurePodcastIndexSecret,
-                          decoration: InputDecoration(
-                            labelText: 'Custom Podcast Index API Secret (Optional)',
-                            border: const OutlineInputBorder(),
-                            prefixIcon: const Icon(Icons.password_outlined),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscurePodcastIndexSecret
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                              ),
-                              tooltip: _obscurePodcastIndexSecret ? 'Show secret' : 'Hide secret',
-                              onPressed: () {
-                                setState(() {
-                                  _obscurePodcastIndexSecret = !_obscurePodcastIndexSecret;
-                                });
-                              },
-                            ),
-                          ),
                         ),
                         const SizedBox(height: 16),
                         const Divider(),
                         const SizedBox(height: 8),
-                        Text(
-                          'OPML Management',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        Text('Accent Color', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: AppAccentColor.values.map((accent) {
+                            final isSelected = settings.accentColor == accent;
+                            return Tooltip(
+                              message: accent.label,
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                                child: InkWell(
+                                  onTap: () => settingsNotifier.setAccentColor(accent),
+                                  borderRadius: BorderRadius.circular(24),
+                                  child: Center(
+                                    child: Container(
+                                      padding: const EdgeInsets.all(3),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: isSelected ? Theme.of(context).colorScheme.primary : Colors.transparent,
+                                          width: 2,
+                                        ),
+                                      ),
+                                      child: CircleAvatar(
+                                        radius: 14,
+                                        backgroundColor: accent.color,
+                                        child: isSelected ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
                         ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'Import subscriptions from or export them to an OPML 2.0 file, compatible with antennaPod, Pocket Casts, and Apple Podcasts.',
-                          style: TextStyle(color: Colors.grey, fontSize: 13),
+                        if (settings.useDynamicColor) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Dynamic system color is currently enabled. Choosing a custom accent color will turn off dynamic theming.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontStyle: FontStyle.italic,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: const Icon(Icons.color_lens_outlined),
+                          title: const Text('Use system theme color'),
+                          subtitle: const Text(
+                            'Adapts brand and accent colors to your OS system theme or wallpaper (Android 12+, Windows, macOS, Linux).',
+                          ),
+                          value: settings.useDynamicColor,
+                          onChanged: (val) {
+                            settingsNotifier.setUseDynamicColor(val);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        DropdownButtonFormField<DefaultLandingTab>(
+                          isExpanded: true,
+                          initialValue: DefaultLandingTab.values.contains(settings.defaultLandingTab)
+                              ? settings.defaultLandingTab
+                              : DefaultLandingTab.catalog,
+                          decoration: const InputDecoration(
+                            labelText: 'Default Startup Tab',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.tab_outlined),
+                          ),
+                          items: DefaultLandingTab.values.map((tab) {
+                            return DropdownMenuItem(value: tab, child: Text(tab.label));
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) settingsNotifier.setDefaultLandingTab(val);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Default Episode Sort Order',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<EpisodeSortOrder>(
+                            segments: const [
+                              ButtonSegment(
+                                value: EpisodeSortOrder.newestFirst,
+                                label: Text('Newest First'),
+                                icon: Icon(Icons.arrow_downward),
+                              ),
+                              ButtonSegment(
+                                value: EpisodeSortOrder.oldestFirst,
+                                label: Text('Oldest First'),
+                                icon: Icon(Icons.arrow_upward),
+                              ),
+                            ],
+                            selected: {settings.defaultEpisodeSort},
+                            onSelectionChanged: (selected) {
+                              settingsNotifier.setDefaultEpisodeSort(selected.first);
+                            },
+                          ),
                         ),
                         const SizedBox(height: 12),
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final isNarrow = constraints.maxWidth < 500;
-                            final exportBtn = OutlinedButton.icon(
-                              icon: const Icon(Icons.file_upload_outlined),
-                              label: const Text('Export OPML'),
-                              onPressed: _exportOpml,
-                            );
-                            final importBtn = ElevatedButton.icon(
-                              icon: const Icon(Icons.file_download_outlined),
-                              label: const Text('Import OPML'),
-                              onPressed: _showImportOpmlDialog,
-                            );
-
-                            if (isNarrow) {
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  exportBtn,
-                                  const SizedBox(height: 12),
-                                  importBtn,
-                                ],
-                              );
-                            }
-
-                            return Row(
-                              children: [
-                                Expanded(child: exportBtn),
-                                const SizedBox(width: 16),
-                                Expanded(child: importBtn),
-                              ],
-                            );
-                          },
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Compact Episode Rows'),
+                          subtitle: const Text('Fit more episodes on screen with dense row layouts'),
+                          value: settings.compactEpisodeRows,
+                          onChanged: (val) => settingsNotifier.setCompactEpisodeRows(val),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Hide Completed Episodes'),
+                          subtitle: const Text('Automatically filter out finished episodes across lists'),
+                          value: settings.hideCompletedEpisodes,
+                          onChanged: (val) => settingsNotifier.setHideCompletedEpisodes(val),
                         ),
                       ],
                     ),
@@ -336,7 +410,216 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 ),
                 const SizedBox(height: 24),
 
-                // 2. DOWNLOADS & STORAGE
+                // 2. PLAYBACK & CONTROLS
+                _buildSectionHeader('Playback & Controls', Icons.play_circle_outline),
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Default Playback Speed: ${(_dragPlaybackSpeed ?? settings.defaultPlaybackSpeed).toStringAsFixed(1)}x',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [1.0, 1.2, 1.5, 2.0].map((preset) {
+                            final isSelected = ((_dragPlaybackSpeed ?? settings.defaultPlaybackSpeed) - preset).abs() < 0.05;
+                            return ChoiceChip(
+                              label: Text('${preset.toStringAsFixed(1)}x'),
+                              selected: isSelected,
+                              onSelected: (_) {
+                                setState(() => _dragPlaybackSpeed = null);
+                                settingsNotifier.setDefaultPlaybackSpeed(preset);
+                              },
+                            );
+                          }).toList(),
+                        ),
+                        Slider(
+                          value: _dragPlaybackSpeed ?? settings.defaultPlaybackSpeed,
+                          min: 0.5,
+                          max: 3.0,
+                          divisions: 25,
+                          label: '${(_dragPlaybackSpeed ?? settings.defaultPlaybackSpeed).toStringAsFixed(1)}x',
+                          onChanged: (val) {
+                            setState(() {
+                              _dragPlaybackSpeed = double.parse(val.toStringAsFixed(1));
+                            });
+                          },
+                          onChangeEnd: (val) {
+                            final speed = double.parse(val.toStringAsFixed(1));
+                            setState(() => _dragPlaybackSpeed = null);
+                            settingsNotifier.setDefaultPlaybackSpeed(speed);
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final isNarrow = constraints.maxWidth < 500;
+                            final rewindDropdown = DropdownButtonFormField<int>(
+                              isExpanded: true,
+                              initialValue: const [5, 10, 15, 30, 45, 60].contains(settings.rewindDurationSeconds)
+                                  ? settings.rewindDurationSeconds
+                                  : 10,
+                              decoration: const InputDecoration(
+                                labelText: 'Rewind Interval',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.replay),
+                              ),
+                              items: const [5, 10, 15, 30, 45, 60]
+                                  .map((s) => DropdownMenuItem(value: s, child: Text('$s seconds')))
+                                  .toList(),
+                              onChanged: (val) {
+                                if (val != null) settingsNotifier.setSeekDurations(rewind: val);
+                              },
+                            );
+
+                            final fastForwardDropdown = DropdownButtonFormField<int>(
+                              isExpanded: true,
+                              initialValue: const [5, 10, 15, 30, 45, 60].contains(settings.fastForwardDurationSeconds)
+                                  ? settings.fastForwardDurationSeconds
+                                  : 30,
+                              decoration: const InputDecoration(
+                                labelText: 'Fast Forward Interval',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.forward),
+                              ),
+                              items: const [5, 10, 15, 30, 45, 60]
+                                  .map((s) => DropdownMenuItem(value: s, child: Text('$s seconds')))
+                                  .toList(),
+                              onChanged: (val) {
+                                if (val != null) settingsNotifier.setSeekDurations(fastForward: val);
+                              },
+                            );
+
+                            if (isNarrow) {
+                              return Column(
+                                children: [
+                                  rewindDropdown,
+                                  const SizedBox(height: 12),
+                                  fastForwardDropdown,
+                                ],
+                              );
+                            }
+                            return Row(
+                              children: [
+                                Expanded(child: rewindDropdown),
+                                const SizedBox(width: 12),
+                                Expanded(child: fastForwardDropdown),
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        DropdownButtonFormField<int>(
+                          isExpanded: true,
+                          initialValue: const [0, 30, 60, 90, 120].contains(settings.markAsPlayedThresholdSeconds)
+                              ? settings.markAsPlayedThresholdSeconds
+                              : 60,
+                          decoration: const InputDecoration(
+                            labelText: 'Mark-as-Played Outro Buffer',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.check_circle_outline),
+                            helperText: 'Episode marks as finished when remaining time drops below this buffer',
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 0, child: Text('At very end (0s)')),
+                            DropdownMenuItem(value: 30, child: Text('30 seconds before end')),
+                            DropdownMenuItem(value: 60, child: Text('60 seconds before end (Default)')),
+                            DropdownMenuItem(value: 90, child: Text('90 seconds before end')),
+                            DropdownMenuItem(value: 120, child: Text('2 minutes before end')),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) settingsNotifier.setMarkAsPlayedThresholdSeconds(val);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Audio Focus Loss Action',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Behavior when another app or notification plays sound',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                              ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<AutoFocusLossAction>(
+                            segments: const [
+                              ButtonSegment(
+                                value: AutoFocusLossAction.pauseAndResume,
+                                label: Text('Pause & Resume'),
+                                icon: Icon(Icons.pause_circle_outline),
+                              ),
+                              ButtonSegment(
+                                value: AutoFocusLossAction.duck,
+                                label: Text('Duck Volume'),
+                                icon: Icon(Icons.volume_down),
+                              ),
+                            ],
+                            selected: {settings.audioFocusLossAction},
+                            onSelectionChanged: (selected) {
+                              settingsNotifier.setAutoFocusLossAction(selected.first);
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        DropdownButtonFormField<int>(
+                          isExpanded: true,
+                          initialValue: const [0, 10, 15, 30].contains(settings.sleepTimerFadeOutSeconds)
+                              ? settings.sleepTimerFadeOutSeconds
+                              : 15,
+                          decoration: const InputDecoration(
+                            labelText: 'Sleep Timer Fade-Out',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.bedtime_outlined),
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 0, child: Text('Disabled (Instant Pause)')),
+                            DropdownMenuItem(value: 10, child: Text('10 seconds fade')),
+                            DropdownMenuItem(value: 15, child: Text('15 seconds fade (Default)')),
+                            DropdownMenuItem(value: 30, child: Text('30 seconds fade')),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) settingsNotifier.setSleepTimerFadeOutSeconds(val);
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Continuous Playback (Auto-play Next)'),
+                          subtitle: const Text('Automatically start next queued episode when current one ends'),
+                          value: settings.autoAdvanceQueue,
+                          onChanged: (val) => settingsNotifier.setAutoAdvanceQueue(val),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Skip Silence'),
+                          subtitle: const Text('Trim conversational pauses dynamically without pitch change'),
+                          value: settings.skipSilence,
+                          onChanged: (val) => settingsNotifier.setSkipSilence(val),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // 3. DOWNLOADS & STORAGE
                 _buildSectionHeader('Downloads & Storage', Icons.download_for_offline_outlined),
                 Card(
                   elevation: 0,
@@ -380,17 +663,30 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                               ),
                             ),
                             OutlinedButton.icon(
-                              icon: const Icon(Icons.delete_outline, size: 16),
+                              icon: _isClearingCache
+                                  ? const SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.delete_outline, size: 16),
                               label: const Text('Clear'),
-                              onPressed: () async {
-                                await ImageCacheService.clearCache();
-                                await _refreshImageCacheSize();
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Image cache cleared')),
-                                  );
-                                }
-                              },
+                              onPressed: _isClearingCache
+                                  ? null
+                                  : () async {
+                                      setState(() => _isClearingCache = true);
+                                      try {
+                                        await ImageCacheService.clearCache();
+                                        await _refreshImageCacheSize();
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(content: Text('Image cache cleared')),
+                                          );
+                                        }
+                                      } finally {
+                                        if (mounted) setState(() => _isClearingCache = false);
+                                      }
+                                    },
                             ),
                           ],
                         ),
@@ -503,23 +799,36 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           ),
                           const SizedBox(height: 8),
                           OutlinedButton.icon(
-                            onPressed: () async {
-                              final count = await ref.read(episodeDownloadServiceProvider).autoDownloadSubscriptions(
-                                maxEpisodesPerSubscription: settings.autoDownloadMaxPerShow,
-                              );
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      count > 0
-                                          ? 'Queued $count episode${count == 1 ? '' : 's'} for download across subscriptions'
-                                          : 'All subscription episodes are already up to date',
-                                    ),
-                                  ),
-                                );
-                              }
-                            },
-                            icon: const Icon(Icons.sync),
+                            onPressed: _isAutoDownloading
+                                ? null
+                                : () async {
+                                    setState(() => _isAutoDownloading = true);
+                                    try {
+                                      final count = await ref.read(episodeDownloadServiceProvider).autoDownloadSubscriptions(
+                                        maxEpisodesPerSubscription: settings.autoDownloadMaxPerShow,
+                                      );
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              count > 0
+                                                  ? 'Queued $count episode${count == 1 ? '' : 's'} for download across subscriptions'
+                                                  : 'All subscription episodes are already up to date',
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                    } finally {
+                                      if (mounted) setState(() => _isAutoDownloading = false);
+                                    }
+                                  },
+                            icon: _isAutoDownloading
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.sync),
                             label: const Text('Download Latest Episodes Now'),
                           ),
                         ],
@@ -529,312 +838,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 ),
                 const SizedBox(height: 24),
 
-                // 3. APPEARANCE & INTERFACE
-                _buildSectionHeader('Appearance & Interface', Icons.palette_outlined),
-                Card(
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: Theme.of(context).dividerColor),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('App Theme', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: AppThemeMode.values.map((mode) {
-                            final isSelected = settings.themeMode == mode;
-                            return ChoiceChip(
-                              label: Text(mode.label),
-                              selected: isSelected,
-                              onSelected: (_) => settingsNotifier.setThemeMode(mode),
-                            );
-                          }).toList(),
-                        ),
-                        const SizedBox(height: 16),
-                        const Divider(),
-                        const SizedBox(height: 8),
-                        Text('Accent Color', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: AppAccentColor.values.map((accent) {
-                            final isSelected = settings.accentColor == accent;
-                            return InkWell(
-                              onTap: () => settingsNotifier.setAccentColor(accent),
-                              borderRadius: BorderRadius.circular(20),
-                              child: Container(
-                                padding: const EdgeInsets.all(3),
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: isSelected ? Theme.of(context).colorScheme.primary : Colors.transparent,
-                                    width: 2,
-                                  ),
-                                ),
-                                child: CircleAvatar(
-                                  radius: 14,
-                                  backgroundColor: accent.color,
-                                  child: isSelected ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                        const SizedBox(height: 12),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          secondary: const Icon(Icons.color_lens_outlined),
-                          title: const Text('Use system theme color'),
-                          subtitle: const Text(
-                            'Adapts brand and accent colors to your OS system theme or wallpaper (Android 12+, Windows, macOS, Linux).',
-                          ),
-                          value: ref.watch(themeSettingsProvider).useDynamicColor,
-                          onChanged: (val) {
-                            ref.read(themeSettingsProvider.notifier).setUseDynamicColor(val);
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        const Divider(),
-                        DropdownButtonFormField<DefaultLandingTab>(
-                          isExpanded: true,
-                          initialValue: DefaultLandingTab.values.contains(settings.defaultLandingTab)
-                              ? settings.defaultLandingTab
-                              : DefaultLandingTab.catalog,
-                          decoration: const InputDecoration(
-                            labelText: 'Default Startup Tab',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.tab_outlined),
-                          ),
-                          items: DefaultLandingTab.values.map((tab) {
-                            return DropdownMenuItem(value: tab, child: Text(tab.label));
-                          }).toList(),
-                          onChanged: (val) {
-                            if (val != null) settingsNotifier.setDefaultLandingTab(val);
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        DropdownButtonFormField<EpisodeSortOrder>(
-                          isExpanded: true,
-                          initialValue: EpisodeSortOrder.values.contains(settings.defaultEpisodeSort)
-                              ? settings.defaultEpisodeSort
-                              : EpisodeSortOrder.newestFirst,
-                          decoration: const InputDecoration(
-                            labelText: 'Default Episode Sort Order',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.sort_rounded),
-                          ),
-                          items: EpisodeSortOrder.values.map((sort) {
-                            return DropdownMenuItem(value: sort, child: Text(sort.label));
-                          }).toList(),
-                          onChanged: (val) {
-                            if (val != null) settingsNotifier.setDefaultEpisodeSort(val);
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Compact Episode Rows'),
-                          subtitle: const Text('Fit more episodes on screen with dense row layouts'),
-                          value: settings.compactEpisodeRows,
-                          onChanged: (val) => settingsNotifier.setCompactEpisodeRows(val),
-                        ),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Hide Completed Episodes'),
-                          subtitle: const Text('Automatically filter out finished episodes across lists'),
-                          value: settings.hideCompletedEpisodes,
-                          onChanged: (val) => settingsNotifier.setHideCompletedEpisodes(val),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // 4. PLAYBACK & AUDIO CONTROLS
-                _buildSectionHeader('Playback & Controls', Icons.play_circle_outline),
-                Card(
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: Theme.of(context).dividerColor),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Default Playback Speed: ${settings.defaultPlaybackSpeed.toStringAsFixed(1)}x',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        Slider(
-                          value: settings.defaultPlaybackSpeed,
-                          min: 0.5,
-                          max: 3.0,
-                          divisions: 25,
-                          label: '${settings.defaultPlaybackSpeed.toStringAsFixed(1)}x',
-                          onChanged: (val) {
-                            settingsNotifier.setDefaultPlaybackSpeed(double.parse(val.toStringAsFixed(1)));
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final isNarrow = constraints.maxWidth < 500;
-                            final rewindDropdown = DropdownButtonFormField<int>(
-                              isExpanded: true,
-                              initialValue: const [5, 10, 15, 30, 45, 60].contains(settings.rewindDurationSeconds)
-                                  ? settings.rewindDurationSeconds
-                                  : 10,
-                              decoration: const InputDecoration(
-                                labelText: 'Rewind Interval',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.replay),
-                              ),
-                              items: const [5, 10, 15, 30, 45, 60]
-                                  .map((s) => DropdownMenuItem(value: s, child: Text('$s seconds')))
-                                  .toList(),
-                              onChanged: (val) {
-                                if (val != null) settingsNotifier.setSeekDurations(rewind: val);
-                              },
-                            );
-
-                            final fastForwardDropdown = DropdownButtonFormField<int>(
-                              isExpanded: true,
-                              initialValue: const [5, 10, 15, 30, 45, 60].contains(settings.fastForwardDurationSeconds)
-                                  ? settings.fastForwardDurationSeconds
-                                  : 30,
-                              decoration: const InputDecoration(
-                                labelText: 'Fast Forward Interval',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.forward),
-                              ),
-                              items: const [5, 10, 15, 30, 45, 60]
-                                  .map((s) => DropdownMenuItem(value: s, child: Text('$s seconds')))
-                                  .toList(),
-                              onChanged: (val) {
-                                if (val != null) settingsNotifier.setSeekDurations(fastForward: val);
-                              },
-                            );
-
-                            if (isNarrow) {
-                              return Column(
-                                children: [
-                                  rewindDropdown,
-                                  const SizedBox(height: 12),
-                                  fastForwardDropdown,
-                                ],
-                              );
-                            }
-                            return Row(
-                              children: [
-                                Expanded(child: rewindDropdown),
-                                const SizedBox(width: 12),
-                                Expanded(child: fastForwardDropdown),
-                              ],
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        DropdownButtonFormField<int>(
-                          isExpanded: true,
-                          initialValue: const [0, 30, 60, 90, 120].contains(settings.markAsPlayedThresholdSeconds)
-                              ? settings.markAsPlayedThresholdSeconds
-                              : 60,
-                          decoration: const InputDecoration(
-                            labelText: 'Mark-as-Played Outro Buffer',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.check_circle_outline),
-                            helperText: 'Episode marks as finished when remaining time drops below this buffer',
-                          ),
-                          items: const [
-                            DropdownMenuItem(value: 0, child: Text('At very end (0s)')),
-                            DropdownMenuItem(value: 30, child: Text('30 seconds before end')),
-                            DropdownMenuItem(value: 60, child: Text('60 seconds before end (Default)')),
-                            DropdownMenuItem(value: 90, child: Text('90 seconds before end')),
-                            DropdownMenuItem(value: 120, child: Text('2 minutes before end')),
-                          ],
-                          onChanged: (val) {
-                            if (val != null) settingsNotifier.setMarkAsPlayedThresholdSeconds(val);
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        DropdownButtonFormField<AutoFocusLossAction>(
-                          isExpanded: true,
-                          initialValue: AutoFocusLossAction.values.contains(settings.audioFocusLossAction)
-                              ? settings.audioFocusLossAction
-                              : AutoFocusLossAction.pauseAndResume,
-                          decoration: const InputDecoration(
-                            labelText: 'Audio Focus Loss Action',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.volume_down_outlined),
-                            helperText: 'Behavior when another app or notification plays sound',
-                          ),
-                          items: AutoFocusLossAction.values.map((act) {
-                            return DropdownMenuItem(value: act, child: Text(act.label));
-                          }).toList(),
-                          onChanged: (val) {
-                            if (val != null) settingsNotifier.setAutoFocusLossAction(val);
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        DropdownButtonFormField<int>(
-                          isExpanded: true,
-                          initialValue: const [0, 10, 15, 30].contains(settings.sleepTimerFadeOutSeconds)
-                              ? settings.sleepTimerFadeOutSeconds
-                              : 15,
-                          decoration: const InputDecoration(
-                            labelText: 'Sleep Timer Fade-Out',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.bedtime_outlined),
-                          ),
-                          items: const [
-                            DropdownMenuItem(value: 0, child: Text('Disabled (Instant Pause)')),
-                            DropdownMenuItem(value: 10, child: Text('10 seconds fade')),
-                            DropdownMenuItem(value: 15, child: Text('15 seconds fade (Default)')),
-                            DropdownMenuItem(value: 30, child: Text('30 seconds fade')),
-                          ],
-                          onChanged: (val) {
-                            if (val != null) settingsNotifier.setSleepTimerFadeOutSeconds(val);
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Continuous Playback (Auto-play Next)'),
-                          subtitle: const Text('Automatically start next queued episode when current one ends'),
-                          value: settings.autoAdvanceQueue,
-                          onChanged: (val) => settingsNotifier.setAutoAdvanceQueue(val),
-                        ),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Skip Silence'),
-                          subtitle: const Text('Trim conversational pauses dynamically without pitch change'),
-                          value: settings.skipSilence,
-                          onChanged: (val) => settingsNotifier.setSkipSilence(val),
-                        ),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Auto-Delete Episode After Play'),
-                          subtitle: const Text('Automatically remove downloaded audio file when playback completes'),
-                          value: settings.autoDeleteAfterPlay,
-                          onChanged: (val) => settingsNotifier.setAutoDeleteAfterPlay(val),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // 5. SYNCHRONIZATION & STORAGE
+                // 4. SYNCHRONIZATION (NEXTCLOUD / GPODDER)
                 _buildSectionHeader('Synchronization (Nextcloud / gPodder)', Icons.sync),
                 Card(
                   elevation: 0,
@@ -899,50 +903,51 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                             prefixIcon: Icon(Icons.lock),
                           ),
                         ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _deviceIdController,
-                          decoration: const InputDecoration(
-                            labelText: 'gPodder Device Identifier',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.devices),
-                            helperText: 'Unique client device identifier registered with Nextcloud gPodder',
-                          ),
-                        ),
                         const SizedBox(height: 16),
                         if (_statusMessage != null) ...[
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: _isSuccessStatus
-                                  ? Colors.green.withValues(alpha: 0.15)
-                                  : Colors.red.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: _isSuccessStatus ? Colors.green : Colors.red,
-                                width: 1,
-                              ),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Icon(
-                                  _isSuccessStatus ? Icons.check_circle_outline : Icons.error_outline,
-                                  color: _isSuccessStatus ? Colors.green[800] : Colors.red[800],
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    _statusMessage!,
-                                    style: TextStyle(
-                                      color: _isSuccessStatus ? Colors.green[900] : Colors.red[900],
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                          Builder(
+                            builder: (context) {
+                              final isDark = Theme.of(context).brightness == Brightness.dark;
+                              return Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: _isSuccessStatus
+                                      ? (isDark ? Colors.green.withValues(alpha: 0.15) : Colors.green[50])
+                                      : (isDark ? Colors.red.withValues(alpha: 0.15) : Colors.red[50]),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: _isSuccessStatus
+                                        ? (isDark ? Colors.green[300]! : Colors.green)
+                                        : (isDark ? Colors.red[300]! : Colors.red),
+                                    width: 1,
                                   ),
                                 ),
-                              ],
-                            ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(
+                                      _isSuccessStatus ? Icons.check_circle_outline : Icons.error_outline,
+                                      color: _isSuccessStatus
+                                          ? (isDark ? Colors.green[300] : Colors.green[800])
+                                          : (isDark ? Colors.red[300] : Colors.red[800]),
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        _statusMessage!,
+                                        style: TextStyle(
+                                          color: _isSuccessStatus
+                                              ? (isDark ? Colors.green[300] : Colors.green[900])
+                                              : (isDark ? Colors.red[300] : Colors.red[900]),
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
                           ),
                           const SizedBox(height: 16),
                         ],
@@ -994,7 +999,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                                       onPressed: isSyncing
                                           ? null
                                           : () async {
-                                              await _saveCredentials();
+                                              await _saveNextcloudCredentials();
                                               ref.read(podcastsNotifierProvider.notifier).refreshAll();
                                             },
                                     ),
@@ -1006,7 +1011,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                                         onPressed: isSyncing
                                             ? null
                                             : () async {
-                                                await _saveCredentials();
+                                                await _saveNextcloudCredentials();
                                                 ref.read(podcastsNotifierProvider.notifier).refreshAll(forceFullResync: true);
                                               },
                                       ),
@@ -1032,14 +1037,38 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                                               icon: const Icon(Icons.cloud_off, color: Colors.red),
                                               label: const Text('Use Local Only'),
                                               onPressed: () async {
-                                                await ref.read(syncServiceProvider).clearCredentials();
-                                                setState(() {
-                                                  _serverController.clear();
-                                                  _userController.clear();
-                                                  _passwordController.clear();
-                                                  _statusMessage = 'Switched to standalone Local Mode.';
-                                                  _isSuccessStatus = true;
-                                                });
+                                                final confirmed = await showDialog<bool>(
+                                                  context: context,
+                                                  builder: (ctx) => AlertDialog(
+                                                    title: const Text('Switch to Local Mode?'),
+                                                    content: const Text(
+                                                      'This will remove your Nextcloud server credentials from this device and stop gPodder synchronization.',
+                                                    ),
+                                                    actions: [
+                                                      TextButton(
+                                                        onPressed: () => Navigator.pop(ctx, false),
+                                                        child: const Text('Cancel'),
+                                                      ),
+                                                      FilledButton(
+                                                        style: FilledButton.styleFrom(
+                                                          backgroundColor: Theme.of(context).colorScheme.error,
+                                                        ),
+                                                        onPressed: () => Navigator.pop(ctx, true),
+                                                        child: const Text('Switch to Local'),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                );
+                                                if (confirmed == true) {
+                                                  await ref.read(syncServiceProvider).clearCredentials();
+                                                  setState(() {
+                                                    _serverController.clear();
+                                                    _userController.clear();
+                                                    _passwordController.clear();
+                                                    _statusMessage = 'Switched to standalone Local Mode.';
+                                                    _isSuccessStatus = true;
+                                                  });
+                                                }
                                               },
                                             ),
                                           ),
@@ -1105,12 +1134,141 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 32),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(16)),
-                  icon: const Icon(Icons.save),
-                  label: const Text('Save All Settings', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  onPressed: _saveCredentials,
+                const SizedBox(height: 24),
+
+                // 5. DISCOVERY & OPML
+                _buildSectionHeader('Discovery & OPML', Icons.explore_outlined),
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        DropdownButtonFormField<PreferredSearchProvider>(
+                          isExpanded: true,
+                          initialValue: PreferredSearchProvider.values.contains(settings.preferredSearchProvider)
+                              ? settings.preferredSearchProvider
+                              : PreferredSearchProvider.itunes,
+                          decoration: const InputDecoration(
+                            labelText: 'Preferred Search Provider',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.travel_explore),
+                          ),
+                          items: PreferredSearchProvider.values.map((p) {
+                            return DropdownMenuItem(value: p, child: Text(p.label));
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) settingsNotifier.setPreferredSearchProvider(val);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: _podcastIndexKeyController,
+                          decoration: const InputDecoration(
+                            labelText: 'Custom Podcast Index API Key (Optional)',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.vpn_key_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _podcastIndexSecretController,
+                          obscureText: _obscurePodcastIndexSecret,
+                          decoration: InputDecoration(
+                            labelText: 'Custom Podcast Index API Secret (Optional)',
+                            border: const OutlineInputBorder(),
+                            prefixIcon: const Icon(Icons.password_outlined),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscurePodcastIndexSecret
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                              ),
+                              tooltip: _obscurePodcastIndexSecret ? 'Show secret' : 'Hide secret',
+                              onPressed: () {
+                                setState(() {
+                                  _obscurePodcastIndexSecret = !_obscurePodcastIndexSecret;
+                                });
+                              },
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _deviceIdController,
+                          decoration: const InputDecoration(
+                            labelText: 'Client Device Identifier',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.devices),
+                            helperText: 'Unique client identifier registered for Podcast Index and gPodder sync',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: FilledButton.icon(
+                            icon: const Icon(Icons.save_outlined),
+                            label: const Text('Save API Keys & Device ID'),
+                            onPressed: _saveDiscoverySettings,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        const SizedBox(height: 8),
+                        Text(
+                          'OPML Management',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Import subscriptions from or export them to an OPML 2.0 file, compatible with antennaPod, Pocket Casts, and Apple Podcasts.',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                        const SizedBox(height: 12),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final isNarrow = constraints.maxWidth < 500;
+                            final exportBtn = OutlinedButton.icon(
+                              icon: const Icon(Icons.file_upload_outlined),
+                              label: const Text('Export OPML'),
+                              onPressed: _exportOpml,
+                            );
+                            final importBtn = ElevatedButton.icon(
+                              icon: const Icon(Icons.file_download_outlined),
+                              label: const Text('Import OPML'),
+                              onPressed: _showImportOpmlDialog,
+                            );
+
+                            if (isNarrow) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  exportBtn,
+                                  const SizedBox(height: 12),
+                                  importBtn,
+                                ],
+                              );
+                            }
+
+                            return Row(
+                              children: [
+                                Expanded(child: exportBtn),
+                                const SizedBox(width: 16),
+                                Expanded(child: importBtn),
+                              ],
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 40),
               ],
@@ -1189,9 +1347,15 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                   const SizedBox(width: 4),
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
-                    icon: const Icon(Icons.delete_sweep_outlined, color: Colors.red, size: 18),
+                    icon: _isClearingDownloads
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red),
+                          )
+                        : const Icon(Icons.delete_sweep_outlined, color: Colors.red, size: 18),
                     label: const Text('Clear All'),
-                    onPressed: () => _showClearAllDownloadsDialog(context),
+                    onPressed: _isClearingDownloads ? null : () => _showClearAllDownloadsDialog(context),
                   ),
                 ],
               ],
@@ -1202,9 +1366,15 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
-                  icon: const Icon(Icons.delete_sweep_outlined, color: Colors.red, size: 18),
+                  icon: _isClearingDownloads
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red),
+                        )
+                      : const Icon(Icons.delete_sweep_outlined, color: Colors.red, size: 18),
                   label: const Text('Clear All Downloads'),
-                  onPressed: () => _showClearAllDownloadsDialog(context),
+                  onPressed: _isClearingDownloads ? null : () => _showClearAllDownloadsDialog(context),
                 ),
               ),
             ],
@@ -1260,13 +1430,18 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     );
 
     if (confirmed == true) {
-      final deleted = await ref.read(episodeDownloadServiceProvider).clearAllDownloads();
-      ref.invalidate(downloadStorageUsageBytesProvider);
-      ref.invalidate(downloadedEpisodesCountProvider);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Cleared $deleted downloaded audio ${deleted == 1 ? 'file' : 'files'}')),
-        );
+      setState(() => _isClearingDownloads = true);
+      try {
+        final deleted = await ref.read(episodeDownloadServiceProvider).clearAllDownloads();
+        ref.invalidate(downloadStorageUsageBytesProvider);
+        ref.invalidate(downloadedEpisodesCountProvider);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Cleared $deleted downloaded audio ${deleted == 1 ? 'file' : 'files'}')),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _isClearingDownloads = false);
       }
     }
   }

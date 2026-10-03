@@ -1449,8 +1449,6 @@ class _EpisodeTile extends ConsumerWidget {
               ? null
               : LayoutBuilder(
                   builder: (context, constraints) {
-                    final isCompact = MediaQuery.sizeOf(context).width < 600;
-
                     final moreMenu = PopupMenuButton<String>(
                       icon: const Icon(Icons.more_vert),
                       tooltip: 'More options',

@@ -8,7 +8,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'core/database/ffi_init.dart';
 import 'core/providers/app_providers.dart';
 import 'core/theme/app_theme.dart';
-import 'core/theme/theme_provider.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'features/player/audio_player_service.dart';
 import 'features/player/podcast_widget_service.dart';
@@ -90,45 +89,29 @@ class PodcastMerlinApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(appSettingsProvider);
-    final themeSettings = ref.watch(themeSettingsProvider);
     final seedColor = settings.accentColor.color;
     final isAmoled = settings.themeMode == AppThemeMode.amoled;
+    final useDynamic = settings.useDynamicColor;
 
     return DynamicColorBuilder(
       builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
-        final lightTheme = themeSettings.useDynamicColor && lightDynamic != null
-            ? AppTheme.createLightTheme(lightDynamic)
-            : ThemeData(
-                useMaterial3: true,
-                colorScheme: ColorScheme.fromSeed(
-                  seedColor: seedColor,
-                  brightness: Brightness.light,
-                ),
-              );
+        final dynamicLight = useDynamic ? lightDynamic : null;
+        final dynamicDark = useDynamic ? darkDynamic : null;
+
+        final lightTheme = AppTheme.createLightTheme(
+          dynamicLight,
+          seedColor: seedColor,
+        );
 
         final darkTheme = isAmoled
-            ? ThemeData(
-                useMaterial3: true,
-                scaffoldBackgroundColor: Colors.black,
-                canvasColor: Colors.black,
-                cardTheme: const CardThemeData(color: Color(0xFF121212)),
-                colorScheme: (themeSettings.useDynamicColor && darkDynamic != null
-                        ? darkDynamic.harmonized()
-                        : ColorScheme.fromSeed(
-                            seedColor: seedColor,
-                            brightness: Brightness.dark,
-                          ))
-                    .copyWith(surface: Colors.black),
+            ? AppTheme.createAmoledTheme(
+                dynamicDark,
+                seedColor: seedColor,
               )
-            : (themeSettings.useDynamicColor && darkDynamic != null
-                ? AppTheme.createDarkTheme(darkDynamic)
-                : ThemeData(
-                    useMaterial3: true,
-                    colorScheme: ColorScheme.fromSeed(
-                      seedColor: seedColor,
-                      brightness: Brightness.dark,
-                    ),
-                  ));
+            : AppTheme.createDarkTheme(
+                dynamicDark,
+                seedColor: seedColor,
+              );
 
         // Sync darkTheme's harmonized primary/onPrimary accents to the home screen widget.
         // When dynamic colors are enabled, surfaceColor is omitted so Android 12+ natively
@@ -137,7 +120,7 @@ class PodcastMerlinApp extends ConsumerWidget {
           PodcastWidgetService.instance.updateThemeColors(
             primaryColor: darkTheme.colorScheme.primary,
             onPrimaryColor: darkTheme.colorScheme.onPrimary,
-            surfaceColor: themeSettings.useDynamicColor
+            surfaceColor: (useDynamic && !isAmoled)
                 ? null
                 : darkTheme.colorScheme.surfaceContainer,
           );

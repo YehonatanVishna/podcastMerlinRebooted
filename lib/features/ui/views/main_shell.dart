@@ -44,9 +44,7 @@ class MainShell extends ConsumerStatefulWidget {
 }
 
 class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserver {
-  final List<ShellNavigationState> _history = [
-    const ShellNavigationState(selectedIndex: 0, selectedPodcast: null),
-  ];
+  late final List<ShellNavigationState> _history;
   int _historyIndex = 0;
   StreamSubscription<String>? _playbackErrorSub;
   Timer? _periodicSyncTimer;
@@ -56,6 +54,10 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    final landingIndex = ref.read(appSettingsProvider).defaultLandingTab.index;
+    _history = [ShellNavigationState(selectedIndex: landingIndex, selectedPodcast: null)];
+    _historyIndex = 0;
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
 
@@ -63,12 +65,6 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
       ref.read(episodeDownloadServiceProvider);
 
       final settings = ref.read(appSettingsProvider);
-      final landingIndex = settings.defaultLandingTab.index;
-      if (landingIndex != 0 && _history.length == 1 && _historyIndex == 0) {
-        setState(() {
-          _history[0] = ShellNavigationState(selectedIndex: landingIndex, selectedPodcast: null);
-        });
-      }
 
       if (settings.syncOnLaunch) {
         _startupSyncTimer = Timer(const Duration(seconds: 1), () {

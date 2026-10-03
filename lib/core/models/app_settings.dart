@@ -103,6 +103,7 @@ class AppSettings {
   // Theme & Appearance
   final AppThemeMode themeMode;
   final AppAccentColor accentColor;
+  final bool useDynamicColor;
   final DefaultLandingTab defaultLandingTab;
   final bool compactEpisodeRows;
   final EpisodeSortOrder defaultEpisodeSort;
@@ -144,6 +145,7 @@ class AppSettings {
   const AppSettings({
     this.themeMode = AppThemeMode.system,
     this.accentColor = AppAccentColor.purple,
+    this.useDynamicColor = true,
     this.defaultLandingTab = DefaultLandingTab.catalog,
     this.compactEpisodeRows = false,
     this.defaultEpisodeSort = EpisodeSortOrder.newestFirst,
@@ -176,6 +178,7 @@ class AppSettings {
   AppSettings copyWith({
     AppThemeMode? themeMode,
     AppAccentColor? accentColor,
+    bool? useDynamicColor,
     DefaultLandingTab? defaultLandingTab,
     bool? compactEpisodeRows,
     EpisodeSortOrder? defaultEpisodeSort,
@@ -220,6 +223,7 @@ class AppSettings {
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
       accentColor: accentColor ?? this.accentColor,
+      useDynamicColor: useDynamicColor ?? this.useDynamicColor,
       defaultLandingTab: defaultLandingTab ?? this.defaultLandingTab,
       compactEpisodeRows: compactEpisodeRows ?? this.compactEpisodeRows,
       defaultEpisodeSort: defaultEpisodeSort ?? this.defaultEpisodeSort,
@@ -254,6 +258,7 @@ class AppSettings {
     return {
       'themeMode': themeMode.name,
       'accentColor': accentColor.name,
+      'useDynamicColor': useDynamicColor,
       'defaultLandingTab': defaultLandingTab.name,
       'compactEpisodeRows': compactEpisodeRows,
       'defaultEpisodeSort': defaultEpisodeSort.name,
@@ -386,6 +391,7 @@ class AppSettings {
     return AppSettings(
       themeMode: parseTheme(json['themeMode']),
       accentColor: parseAccent(json['accentColor']),
+      useDynamicColor: parseBool(json['useDynamicColor'], true),
       defaultLandingTab: parseTab(json['defaultLandingTab']),
       compactEpisodeRows: parseBool(json['compactEpisodeRows'], false),
       defaultEpisodeSort: parseSort(json['defaultEpisodeSort']),

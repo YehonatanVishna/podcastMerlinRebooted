@@ -158,7 +158,8 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
 
   // Convenience mutators
   void setThemeMode(AppThemeMode mode) => _update((s) => s.copyWith(themeMode: mode));
-  void setAccentColor(AppAccentColor color) => _update((s) => s.copyWith(accentColor: color));
+  void setAccentColor(AppAccentColor color) => _update((s) => s.copyWith(accentColor: color, useDynamicColor: false));
+  void setUseDynamicColor(bool useDynamic) => _update((s) => s.copyWith(useDynamicColor: useDynamic));
   void setDefaultLandingTab(DefaultLandingTab tab) => _update((s) => s.copyWith(defaultLandingTab: tab));
   void setCompactEpisodeRows(bool compact) => _update((s) => s.copyWith(compactEpisodeRows: compact));
   void setDefaultEpisodeSort(EpisodeSortOrder sort) => _update((s) => s.copyWith(defaultEpisodeSort: sort));

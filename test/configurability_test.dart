@@ -35,6 +35,7 @@ void main() {
       const settings = AppSettings();
       expect(settings.themeMode, AppThemeMode.system);
       expect(settings.accentColor, AppAccentColor.purple);
+      expect(settings.useDynamicColor, isTrue);
       expect(settings.defaultLandingTab, DefaultLandingTab.catalog);
       expect(settings.compactEpisodeRows, isFalse);
       expect(settings.defaultEpisodeSort, EpisodeSortOrder.newestFirst);
@@ -67,6 +68,7 @@ void main() {
       const original = AppSettings(
         themeMode: AppThemeMode.amoled,
         accentColor: AppAccentColor.teal,
+        useDynamicColor: false,
         defaultLandingTab: DefaultLandingTab.downloads,
         compactEpisodeRows: true,
         defaultEpisodeSort: EpisodeSortOrder.oldestFirst,
@@ -98,6 +100,7 @@ void main() {
 
       expect(parsed.themeMode, AppThemeMode.amoled);
       expect(parsed.accentColor, AppAccentColor.teal);
+      expect(parsed.useDynamicColor, isFalse);
       expect(parsed.defaultLandingTab, DefaultLandingTab.downloads);
       expect(parsed.compactEpisodeRows, isTrue);
       expect(parsed.defaultEpisodeSort, EpisodeSortOrder.oldestFirst);
@@ -306,7 +309,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Discovery & OPML'), findsOneWidget);
-      expect(find.text('Save All Settings'), findsOneWidget);
+      expect(find.text('Save API Keys & Device ID'), findsOneWidget);
     });
 
     testWidgets('Tapping theme choice chip updates appSettingsProvider', (tester) async {
@@ -368,10 +371,10 @@ void main() {
       expect(container.read(appSettingsProvider).autoDeleteAfterPlay, isTrue);
 
       final autoDeleteFinder = find.widgetWithText(SwitchListTile, 'Auto-Delete Episode After Play');
-      expect(autoDeleteFinder, findsWidgets);
+      expect(autoDeleteFinder, findsOneWidget);
 
-      await tester.ensureVisible(autoDeleteFinder.first);
-      await tester.tap(autoDeleteFinder.first);
+      await tester.ensureVisible(autoDeleteFinder);
+      await tester.tap(autoDeleteFinder);
       await tester.pumpAndSettle();
 
       expect(container.read(appSettingsProvider).autoDeleteAfterPlay, isFalse);
