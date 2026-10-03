@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/database/database_helper.dart';
 import '../../core/models/episode.dart';
 import '../../core/models/podcast.dart';
+import '../../core/models/app_settings.dart';
 
 class DownloadTaskEvent {
   final int episodeId;
@@ -49,8 +50,13 @@ class DownloadTaskEvent {
 class EpisodeDownloadService {
   final DatabaseHelper _db;
   final Dio _dio;
-  final int maxConcurrentDownloads;
+  int maxConcurrentDownloads;
   final Future<Directory> Function()? _customDirResolver;
+
+  bool downloadWifiOnly = true;
+  String? customDownloadPath;
+  AutoDeletePlayedPolicy autoDeletePlayed = AutoDeletePlayedPolicy.immediately;
+  int maxStorageQuotaGb = 10;
 
   final Map<int, CancelToken> _activeDownloads = {};
   final Set<int> _pausedEpisodeIds = <int>{};
@@ -80,6 +86,25 @@ class EpisodeDownloadService {
               ),
             ),
         _customDirResolver = downloadDirResolver;
+
+  void updateConstraints({
+    bool? wifiOnly,
+    int? maxConcurrent,
+    String? customPath,
+    AutoDeletePlayedPolicy? autoDelete,
+    int? quotaGb,
+  }) {
+    if (wifiOnly != null) downloadWifiOnly = wifiOnly;
+    if (maxConcurrent != null && maxConcurrent > 0) {
+      maxConcurrentDownloads = maxConcurrent;
+      while (_activeDownloads.length < maxConcurrentDownloads && _queuedEpisodes.isNotEmpty) {
+        _processNextQueueItem();
+      }
+    }
+    if (customPath != null) customDownloadPath = customPath;
+    if (autoDelete != null) autoDeletePlayed = autoDelete;
+    if (quotaGb != null) maxStorageQuotaGb = quotaGb;
+  }
 
   void dispose() {
     for (final token in _activeDownloads.values) {
@@ -114,6 +139,18 @@ class EpisodeDownloadService {
   }
 
   Future<Directory> getDownloadsDirectory() async {
+    if (customDownloadPath != null && customDownloadPath!.isNotEmpty) {
+      final dir = Directory(customDownloadPath!);
+      if (!await dir.exists()) {
+        try {
+          await dir.create(recursive: true);
+        } catch (_) {}
+      }
+      if (await dir.exists()) {
+        return dir;
+      }
+    }
+
     if (_customDirResolver != null) {
       final dir = await _customDirResolver();
       if (!await dir.exists()) {

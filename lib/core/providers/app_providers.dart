@@ -5,6 +5,7 @@ import '../models/episode.dart';
 import '../models/podcast.dart';
 import '../models/gpodder_action.dart';
 import '../models/sync_status.dart';
+import '../models/app_settings.dart';
 import '../services/image_cache_service.dart';
 import '../utils/error_formatter.dart';
 import '../../features/player/audio_player_service.dart';
@@ -15,6 +16,10 @@ import '../../features/discovery/multisource_search_service.dart';
 import '../../features/discovery/podcast_index_provider.dart';
 import '../../features/discovery/discovery_notifier.dart';
 import '../../features/downloads/episode_download_service.dart';
+import 'app_settings_provider.dart';
+
+export '../models/app_settings.dart';
+export 'app_settings_provider.dart';
 
 final databaseProvider = Provider<DatabaseHelper>((ref) => DatabaseHelper.instance);
 final secureStorageProvider = Provider<SecureStorageService>((ref) => SecureStorageService());
@@ -41,6 +46,18 @@ final episodeDownloadServiceProvider = Provider<EpisodeDownloadService>((ref) {
       );
     } catch (_) {}
   });
+
+  try {
+    final handler = ref.read(audioHandlerProvider);
+    handler.onEpisodeCompleted = (episode) async {
+      try {
+        final settings = ref.read(appSettingsProvider);
+        if (settings.autoDeletePlayed == AutoDeletePlayedPolicy.immediately) {
+          await service.deleteDownload(episode);
+        }
+      } catch (_) {}
+    };
+  } catch (_) {}
 
   ref.onDispose(() {
     sub.cancel();
@@ -284,6 +301,7 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
   final MerlinAudioHandler _audioHandler;
   final EpisodeDownloadService? _downloadService;
   final int? _podcastId;
+  final AppSettings? _settings;
   StreamSubscription<PositionUpdateEvent>? _posSub;
   StreamSubscription<SyncStatusState>? _syncSub;
   StreamSubscription<DownloadTaskEvent>? _downloadSub;
@@ -295,7 +313,10 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
     this._audioHandler,
     this._podcastId, {
     this._downloadService,
-  }) : super(const EpisodesState(isLoading: true)) {
+    AppSettings? settings,
+  // ignore: prefer_initializing_formals
+  })  : _settings = settings,
+        super(const EpisodesState(isLoading: true)) {
     loadEpisodes();
     _posSub = _audioHandler.onPositionUpdated.listen((event) {
       updateEpisodeProgress(event.mediaUrl, event.position, event.isPlayed);
@@ -364,9 +385,25 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
     try {
       final podcastId = _podcastId;
       final fetchLimit = state.episodes.length > pageSize ? state.episodes.length : pageSize;
+      final sortDesc = _settings?.defaultEpisodeSort.isDescending ?? true;
+      final hideComp = _settings?.hideCompletedEpisodes ?? false;
+
       final list = podcastId != null
-          ? await _db.getEpisodesForPodcast(podcastId, limit: fetchLimit, offset: 0, filter: currentFilter)
-          : await _db.getAllEpisodes(limit: fetchLimit, offset: 0, filter: currentFilter);
+          ? await _db.getEpisodesForPodcast(
+              podcastId,
+              limit: fetchLimit,
+              offset: 0,
+              filter: currentFilter,
+              sortDescending: sortDesc,
+              hideCompleted: hideComp,
+            )
+          : await _db.getAllEpisodes(
+              limit: fetchLimit,
+              offset: 0,
+              filter: currentFilter,
+              sortDescending: sortDesc,
+              hideCompleted: hideComp,
+            );
 
       if (mounted) {
         state = EpisodesState(
@@ -391,9 +428,25 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
     try {
       final offset = state.episodes.length;
       final podcastId = _podcastId;
+      final sortDesc = _settings?.defaultEpisodeSort.isDescending ?? true;
+      final hideComp = _settings?.hideCompletedEpisodes ?? false;
+
       final newEpisodes = podcastId != null
-          ? await _db.getEpisodesForPodcast(podcastId, limit: pageSize, offset: offset, filter: state.filter)
-          : await _db.getAllEpisodes(limit: pageSize, offset: offset, filter: state.filter);
+          ? await _db.getEpisodesForPodcast(
+              podcastId,
+              limit: pageSize,
+              offset: offset,
+              filter: state.filter,
+              sortDescending: sortDesc,
+              hideCompleted: hideComp,
+            )
+          : await _db.getAllEpisodes(
+              limit: pageSize,
+              offset: offset,
+              filter: state.filter,
+              sortDescending: sortDesc,
+              hideCompleted: hideComp,
+            );
 
       if (!mounted) return;
 
@@ -539,6 +592,7 @@ final episodesNotifierProvider = StateNotifierProvider.autoDispose
     ref.watch(audioHandlerProvider),
     podcastId,
     downloadService: ref.watch(episodeDownloadServiceProvider),
+    settings: ref.watch(appSettingsProvider),
   );
 });
 

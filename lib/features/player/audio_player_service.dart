@@ -8,6 +8,7 @@ import '../../core/database/database_helper.dart';
 import '../../core/database/ffi_init.dart';
 import '../../core/models/episode.dart';
 import '../../core/models/gpodder_action.dart';
+import '../../core/models/app_settings.dart';
 import '../../core/services/image_cache_service.dart';
 import '../sync/secure_storage_service.dart';
 import '../sync/sync_service.dart';
@@ -28,6 +29,14 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   List<Episode> _queue = [];
   final StreamController<List<Episode>> _queueController =
       StreamController<List<Episode>>.broadcast();
+
+  // Configurable playback settings
+  bool autoAdvanceQueue = true;
+  int markAsPlayedThresholdSeconds = 60;
+  AutoFocusLossAction audioFocusLossAction = AutoFocusLossAction.pauseAndResume;
+  int sleepTimerFadeOutSeconds = 15;
+  bool skipSilence = false;
+  void Function(Episode episode)? onEpisodeCompleted;
 
   // Sleep timer state
   Timer? _sleepTimer;
@@ -220,6 +229,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     if (hasLocalFile) {
       try {
         await _player.setFilePath(localPath, initialPosition: initialPos).timeout(const Duration(seconds: 30));
+        await _applyPlayerSettings();
         return;
       } catch (e) {
         if (kDebugMode) {
@@ -228,6 +238,22 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       }
     }
     await _player.setUrl(ep.mediaUrl, initialPosition: initialPos).timeout(const Duration(seconds: 30));
+    await _applyPlayerSettings();
+  }
+
+  Future<void> _applyPlayerSettings() async {
+    try {
+      if (urlLoader == null) {
+        if (_speed != 1.0) {
+          await _player.setSpeed(_speed);
+        }
+        if (skipSilence) {
+          try {
+            await _player.setSkipSilenceEnabled(true);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
   }
 
   Stream<PositionUpdateEvent> get onPositionUpdated => _positionUpdateController.stream;
@@ -286,7 +312,12 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         if (event.begin) {
           switch (event.type) {
             case AudioInterruptionType.duck:
-              _player.setVolume(0.5);
+              if (audioFocusLossAction == AutoFocusLossAction.duck) {
+                _player.setVolume(0.5);
+              } else {
+                _wasPlayingBeforeInterruption = _player.playing;
+                pause();
+              }
               break;
             case AudioInterruptionType.pause:
             case AudioInterruptionType.unknown:
@@ -297,7 +328,13 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         } else {
           switch (event.type) {
             case AudioInterruptionType.duck:
-              _player.setVolume(1.0);
+              if (audioFocusLossAction == AutoFocusLossAction.duck) {
+                _player.setVolume(1.0);
+              } else {
+                if (_wasPlayingBeforeInterruption) {
+                  play();
+                }
+              }
               break;
             case AudioInterruptionType.pause:
               if (_wasPlayingBeforeInterruption) {
@@ -962,8 +999,13 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
 
     bool isPlayed = false;
     if (totalSec > 0 && currentSec > 0) {
-      if (totalSec > 60) {
-        if ((totalSec - currentSec) <= 60) {
+      final threshold = markAsPlayedThresholdSeconds;
+      if (threshold <= 0) {
+        if (currentSec >= totalSec) {
+          isPlayed = true;
+        }
+      } else if (totalSec > threshold) {
+        if ((totalSec - currentSec) <= threshold) {
           isPlayed = true;
         }
       } else {
@@ -1066,6 +1108,14 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     }
     _stopPeriodicPositionSync();
 
+    // Notify listeners (e.g. for auto-deletion of played downloads)
+    final completedEp = _currentEpisode;
+    if (completedEp != null) {
+      try {
+        onEpisodeCompleted?.call(completedEp);
+      } catch (_) {}
+    }
+
     // Check Sleep Timer: if endOfEpisode, stop and cancel timer!
     if (_sleepTimerMode == SleepTimerMode.endOfEpisode) {
       cancelSleepTimer();
@@ -1073,8 +1123,8 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       return;
     }
 
-    // Automatically pop and play next episode if queue has items!
-    if (_queue.isNotEmpty) {
+    // Automatically pop and play next episode if autoAdvanceQueue is enabled and queue has items!
+    if (autoAdvanceQueue && _queue.isNotEmpty) {
       await playNextInQueue();
     } else {
       await _player.stop();
@@ -1187,9 +1237,9 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
           _sleepTimerController.add(_sleepTimerRemaining);
         }
 
-        // Smooth volume fade out in the last 15 seconds
-        if (_sleepTimerRemaining!.inSeconds <= 15) {
-          final fade = (_sleepTimerRemaining!.inSeconds / 15.0).clamp(0.05, 1.0);
+        // Smooth volume fade out in the last seconds (if enabled)
+        if (sleepTimerFadeOutSeconds > 0 && _sleepTimerRemaining!.inSeconds <= sleepTimerFadeOutSeconds) {
+          final fade = (_sleepTimerRemaining!.inSeconds / sleepTimerFadeOutSeconds.toDouble()).clamp(0.05, 1.0);
           if (urlLoader == null) {
             await _player.setVolume(fade);
           }
@@ -1255,6 +1305,36 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     if (!_seekDurationsController.isClosed) {
       _seekDurationsController.add((rewind: rewindDuration, fastForward: fastForwardDuration));
     }
+  }
+
+  void setDefaultSpeed(double speed) {
+    _speed = speed;
+    setSpeed(speed);
+  }
+
+  void setAutoAdvance(bool autoAdvance) {
+    autoAdvanceQueue = autoAdvance;
+  }
+
+  void setMarkPlayedThreshold(int seconds) {
+    markAsPlayedThresholdSeconds = seconds;
+  }
+
+  void setAutoFocusAction(AutoFocusLossAction action) {
+    audioFocusLossAction = action;
+  }
+
+  void setSleepTimerFadeDuration(int seconds) {
+    sleepTimerFadeOutSeconds = seconds;
+  }
+
+  Future<void> setSkipSilence(bool skip) async {
+    skipSilence = skip;
+    try {
+      if (urlLoader == null) {
+        await _player.setSkipSilenceEnabled(skip);
+      }
+    } catch (_) {}
   }
 
   void dispose() {

@@ -49,6 +49,8 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
   ];
   int _historyIndex = 0;
   StreamSubscription<String>? _playbackErrorSub;
+  Timer? _periodicSyncTimer;
+  Timer? _startupSyncTimer;
 
   @override
   void initState() {
@@ -56,6 +58,25 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+
+      final settings = ref.read(appSettingsProvider);
+      final landingIndex = settings.defaultLandingTab.index;
+      if (landingIndex != 0 && _history.length == 1 && _historyIndex == 0) {
+        setState(() {
+          _history[0] = ShellNavigationState(selectedIndex: landingIndex, selectedPodcast: null);
+        });
+      }
+
+      if (settings.syncOnLaunch) {
+        _startupSyncTimer = Timer(const Duration(seconds: 1), () {
+          if (mounted) {
+            ref.read(podcastsNotifierProvider.notifier).refreshAll();
+          }
+        });
+      }
+
+      _setupPeriodicSync();
+
       _playbackErrorSub = ref.read(audioHandlerProvider).onPlaybackError.listen((errorMsg) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -77,6 +98,19 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
     });
   }
 
+  void _setupPeriodicSync() {
+    _periodicSyncTimer?.cancel();
+    final settings = ref.read(appSettingsProvider);
+    final intervalMins = settings.periodicSyncIntervalMinutes;
+    if (intervalMins > 0) {
+      _periodicSyncTimer = Timer.periodic(Duration(minutes: intervalMins), (_) {
+        if (mounted) {
+          ref.read(podcastsNotifierProvider.notifier).refreshAll();
+        }
+      });
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
@@ -89,7 +123,9 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _startupSyncTimer?.cancel();
     _playbackErrorSub?.cancel();
+    _periodicSyncTimer?.cancel();
     super.dispose();
   }
 

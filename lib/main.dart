@@ -64,7 +64,7 @@ void main() async {
   );
 }
 
-class PodcastMerlinApp extends StatelessWidget {
+class PodcastMerlinApp extends ConsumerWidget {
   const PodcastMerlinApp({super.key});
 
   static final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -84,26 +84,45 @@ class PodcastMerlinApp extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(appSettingsProvider);
+    final seedColor = settings.accentColor.color;
+    final isAmoled = settings.themeMode == AppThemeMode.amoled;
+
+    final lightTheme = ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: seedColor,
+        brightness: Brightness.light,
+      ),
+    );
+
+    final darkTheme = isAmoled
+        ? ThemeData(
+            useMaterial3: true,
+            scaffoldBackgroundColor: Colors.black,
+            canvasColor: Colors.black,
+            cardTheme: const CardThemeData(color: Color(0xFF121212)),
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: seedColor,
+              brightness: Brightness.dark,
+            ).copyWith(surface: Colors.black),
+          )
+        : ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: seedColor,
+              brightness: Brightness.dark,
+            ),
+          );
+
     return MaterialApp(
       navigatorKey: rootNavigatorKey,
       title: 'Podcast Merlin',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6750A4),
-          brightness: Brightness.light,
-        ),
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFD0BCFF),
-          brightness: Brightness.dark,
-        ),
-      ),
-      themeMode: ThemeMode.system,
+      theme: lightTheme,
+      darkTheme: darkTheme,
+      themeMode: settings.themeMode.toThemeMode(),
       builder: (context, child) {
         return Shortcuts(
           shortcuts: <ShortcutActivator, Intent>{

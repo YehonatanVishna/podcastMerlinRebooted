@@ -681,6 +681,8 @@ class DatabaseHelper {
     int? limit,
     int? offset,
     EpisodeFilter filter = EpisodeFilter.all,
+    bool sortDescending = true,
+    bool hideCompleted = false,
   }) async {
     final db = await instance.database;
     await _detectColumnNames(db);
@@ -699,12 +701,17 @@ class DatabaseHelper {
       whereClause += " AND e.downloadStatus = 'downloaded' AND e.downloadPath IS NOT NULL";
     }
 
+    if (hideCompleted && filter != EpisodeFilter.finished) {
+      whereClause += ' AND e.$_isPlayedCol = 0 AND (e.duration IS NULL OR e.duration = 0 OR e.position = 0 OR ((e.duration > 60 AND (e.duration - e.position) > 60) OR (e.duration <= 60 AND e.position < (CASE WHEN e.duration > 10 THEN e.duration - 10 ELSE e.duration END))))';
+    }
+
+    final sortDirection = sortDescending ? 'DESC' : 'ASC';
     final query = '''
       SELECT e.*, p.$_podcastRssUrlCol AS podcastRss
       FROM episodes e
       LEFT JOIN podcasts p ON e.$_podcastIdCol = p.id
       WHERE $whereClause
-      ORDER BY e.$_pubDateCol DESC
+      ORDER BY e.$_pubDateCol $sortDirection
       ${limit != null ? 'LIMIT $limit' : (offset != null ? 'LIMIT -1' : '')}
       ${offset != null ? 'OFFSET $offset' : ''}
     ''';
@@ -717,6 +724,8 @@ class DatabaseHelper {
     int? limit,
     int? offset,
     EpisodeFilter filter = EpisodeFilter.all,
+    bool sortDescending = true,
+    bool hideCompleted = false,
   }) async {
     final db = await instance.database;
     await _detectColumnNames(db);
@@ -735,12 +744,17 @@ class DatabaseHelper {
       whereClause = "e.downloadStatus = 'downloaded' AND e.downloadPath IS NOT NULL";
     }
 
+    if (hideCompleted && filter != EpisodeFilter.finished) {
+      whereClause += ' AND e.$_isPlayedCol = 0 AND (e.duration IS NULL OR e.duration = 0 OR e.position = 0 OR ((e.duration > 60 AND (e.duration - e.position) > 60) OR (e.duration <= 60 AND e.position < (CASE WHEN e.duration > 10 THEN e.duration - 10 ELSE e.duration END))))';
+    }
+
+    final sortDirection = sortDescending ? 'DESC' : 'ASC';
     final query = '''
       SELECT e.*, p.$_podcastRssUrlCol AS podcastRss
       FROM episodes e
       LEFT JOIN podcasts p ON e.$_podcastIdCol = p.id
       WHERE $whereClause
-      ORDER BY e.$_pubDateCol DESC
+      ORDER BY e.$_pubDateCol $sortDirection
       ${limit != null ? 'LIMIT $limit' : (offset != null ? 'LIMIT -1' : '')}
       ${offset != null ? 'OFFSET $offset' : ''}
     ''';
