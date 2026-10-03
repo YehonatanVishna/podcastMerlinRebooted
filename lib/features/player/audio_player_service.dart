@@ -97,6 +97,55 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     await _restoreLastPlayback();
   }
 
+  Future<MediaItem> _createMediaItem(Episode ep, {String? fallbackShowTitle}) async {
+    final cleanTitle = ep.title.trim().isNotEmpty ? ep.title.trim() : 'Podcast Episode';
+
+    String showTitle = fallbackShowTitle?.trim() ?? '';
+    if (showTitle.isEmpty) {
+      if (ep.podcastId != null && ep.podcastId! > 0) {
+        final pod = await _db.getPodcastById(ep.podcastId!);
+        if (pod != null && pod.title.trim().isNotEmpty) {
+          showTitle = pod.title.trim();
+        }
+      }
+    }
+    if (showTitle.isEmpty && ep.podcastRss.trim().isNotEmpty) {
+      final pod = await _db.getPodcastByRssUrl(ep.podcastRss);
+      if (pod != null && pod.title.trim().isNotEmpty) {
+        showTitle = pod.title.trim();
+      }
+    }
+    if (showTitle.isEmpty) {
+      showTitle = 'Podcast Merlin';
+    }
+
+    Uri? artUri;
+    if (ep.imageUrl.isNotEmpty) {
+      if (!kIsWeb) {
+        final cachedFilePath = await ImageCacheService.getCachedFilePath(ep.imageUrl);
+        if (cachedFilePath != null) {
+          artUri = Uri.file(cachedFilePath);
+        } else {
+          artUri = Uri.tryParse(ep.imageUrl);
+        }
+      } else {
+        artUri = Uri.tryParse(ep.imageUrl);
+      }
+    }
+
+    return MediaItem(
+      id: ep.mediaUrl,
+      album: showTitle,
+      artist: showTitle,
+      title: cleanTitle,
+      displayTitle: cleanTitle,
+      displaySubtitle: showTitle,
+      displayDescription: showTitle,
+      artUri: artUri,
+      duration: Duration(seconds: ep.duration),
+    );
+  }
+
   Future<void> _restoreLastPlayback() async {
     try {
       final activeEp = await _db.getActivePlayback();
@@ -107,14 +156,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         if (_queue.isNotEmpty) {
           final firstQueued = _queue.first;
           _currentEpisode = firstQueued.copyWith(position: 0);
-          final newItem = MediaItem(
-            id: firstQueued.mediaUrl,
-            album: firstQueued.podcastRss.isNotEmpty ? firstQueued.podcastRss : 'Podcast Merlin',
-            artist: firstQueued.podcastRss.isNotEmpty ? firstQueued.podcastRss : 'Podcast Merlin',
-            title: firstQueued.title,
-            artUri: firstQueued.imageUrl.isNotEmpty ? Uri.tryParse(firstQueued.imageUrl) : null,
-            duration: Duration(seconds: firstQueued.duration),
-          );
+          final newItem = await _createMediaItem(firstQueued);
           mediaItem.add(newItem);
           playbackState.add(playbackState.value.copyWith(
             controls: [
@@ -149,28 +191,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         ImageCacheService.precacheImageUrl(activeEp.imageUrl);
       }
 
-      Uri? artUri;
-      if (activeEp.imageUrl.isNotEmpty) {
-        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
-          final cachedFilePath = await ImageCacheService.getCachedFilePath(activeEp.imageUrl);
-          if (cachedFilePath != null) {
-            artUri = Uri.file(cachedFilePath);
-          } else {
-            artUri = Uri.tryParse(activeEp.imageUrl);
-          }
-        } else {
-          artUri = Uri.tryParse(activeEp.imageUrl);
-        }
-      }
-
-      final newItem = MediaItem(
-        id: activeEp.mediaUrl,
-        album: showTitle,
-        artist: showTitle,
-        title: activeEp.title,
-        artUri: artUri,
-        duration: Duration(seconds: activeEp.duration),
-      );
+      final newItem = await _createMediaItem(activeEp, fallbackShowTitle: showTitle);
       mediaItem.add(newItem);
 
       final restoredState = playbackState.value.copyWith(
@@ -582,32 +603,13 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       ImageCacheService.precacheImageUrl(epToPlay.imageUrl);
     }
 
-    // Use local file URI for MPRIS/OS playback art if on Linux and cached; use network URL on Android/Web
-    Uri? artUri;
-    if (epToPlay.imageUrl.isNotEmpty) {
-      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
-        final cachedFilePath = await ImageCacheService.getCachedFilePath(epToPlay.imageUrl);
-        if (cachedFilePath != null) {
-          artUri = Uri.file(cachedFilePath);
-        } else {
-          artUri = Uri.tryParse(epToPlay.imageUrl);
-        }
-      } else {
-        artUri = Uri.tryParse(epToPlay.imageUrl);
-      }
-    }
-
+    final newItem = await _createMediaItem(epToPlay, fallbackShowTitle: showTitle);
     if (currentRequestId != _playRequestId) return;
-
-    final newItem = MediaItem(
-      id: epToPlay.mediaUrl,
-      album: showTitle,
-      artist: showTitle,
-      title: epToPlay.title,
-      artUri: artUri,
-      duration: Duration(seconds: epToPlay.duration),
-    );
     mediaItem.add(newItem);
+    // Yield a tick so audio_service's mediaItem listener dispatches SetMediaItemRequest
+    // to the platform before playbackState transitions to playing: true (which invokes startForeground)
+    await Future.delayed(Duration.zero);
+    if (currentRequestId != _playRequestId) return;
 
     final initialLoadingState = playbackState.value.copyWith(
       controls: [
@@ -760,6 +762,13 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
 
     if (_currentEpisode == null) {
       return;
+    }
+
+    // Ensure valid MediaItem exists before starting playback
+    if (mediaItem.value == null || mediaItem.value!.id != _currentEpisode!.mediaUrl) {
+      final item = await _createMediaItem(_currentEpisode!);
+      mediaItem.add(item);
+      await Future.delayed(Duration.zero);
     }
 
     if (_preparingSourceCompleter != null) {
@@ -1164,14 +1173,21 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   void _syncMediaItemQueue() {
-    final mediaItems = _queue.map((ep) => MediaItem(
-      id: ep.mediaUrl,
-      album: ep.podcastRss,
-      artist: ep.podcastRss,
-      title: ep.title,
-      duration: Duration(seconds: ep.duration),
-      artUri: Uri.tryParse(ep.imageUrl),
-    )).toList();
+    final mediaItems = _queue.map((ep) {
+      final cleanTitle = ep.title.trim().isNotEmpty ? ep.title.trim() : 'Podcast Episode';
+      final showTitle = ep.podcastRss.trim().isNotEmpty ? ep.podcastRss.trim() : 'Podcast Merlin';
+      return MediaItem(
+        id: ep.mediaUrl,
+        album: showTitle,
+        artist: showTitle,
+        title: cleanTitle,
+        displayTitle: cleanTitle,
+        displaySubtitle: showTitle,
+        displayDescription: showTitle,
+        duration: Duration(seconds: ep.duration),
+        artUri: ep.imageUrl.isNotEmpty ? Uri.tryParse(ep.imageUrl) : null,
+      );
+    }).toList();
     queue.add(mediaItems);
     if (!_queueController.isClosed) {
       _queueController.add(List.unmodifiable(_queue));

@@ -42,7 +42,7 @@ void main() async {
       androidNotificationChannelId: 'com.podcastmerlin.audio',
       androidNotificationChannelName: 'Podcast Merlin Playback',
       androidNotificationOngoing: false,
-      androidStopForegroundOnPause: false,
+      androidStopForegroundOnPause: true,
       androidNotificationClickStartsActivity: true,
       androidNotificationIcon: 'drawable/ic_stat_podcast',
       androidShowNotificationBadge: true,
