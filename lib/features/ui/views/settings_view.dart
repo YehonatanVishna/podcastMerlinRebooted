@@ -284,17 +284,18 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         Text('Accent Color', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
                         const SizedBox(height: 8),
                         Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
+                          spacing: 12,
+                          runSpacing: 12,
                           children: AppAccentColor.values.map((accent) {
                             final isSelected = settings.accentColor == accent;
                             return Tooltip(
                               message: accent.label,
-                              child: ConstrainedBox(
-                                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                                child: InkWell(
+                              child: SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: InkResponse(
                                   onTap: () => settingsNotifier.setAccentColor(accent),
-                                  borderRadius: BorderRadius.circular(24),
+                                  radius: 24,
                                   child: Center(
                                     child: Container(
                                       padding: const EdgeInsets.all(3),

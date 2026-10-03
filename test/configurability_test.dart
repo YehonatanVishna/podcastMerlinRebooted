@@ -419,5 +419,51 @@ void main() {
 
       container.dispose();
     });
+
+    testWidgets('Accent color swatches render horizontally on desktop and tap updates accent color', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final mockStorage = MockSecureStorage();
+      late ProviderContainer container;
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container = ProviderContainer(
+            overrides: [
+              secureStorageProvider.overrideWithValue(mockStorage),
+              downloadStorageUsageBytesProvider.overrideWith((ref) => Future.value(0)),
+              downloadedEpisodesCountProvider.overrideWith((ref) => Future.value(0)),
+            ],
+          ),
+          child: const MaterialApp(
+            home: SettingsView(),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      final amberSwatch = find.byTooltip('Amber Gold');
+      final purpleSwatch = find.byTooltip('Merlin Purple');
+      expect(amberSwatch, findsOneWidget);
+      expect(purpleSwatch, findsOneWidget);
+
+      final amberTop = tester.getTopLeft(amberSwatch).dy;
+      final purpleTop = tester.getTopLeft(purpleSwatch).dy;
+      expect((amberTop - purpleTop).abs() < 1.0, isTrue, reason: 'Swatches should be in a horizontal row, not stacked vertically');
+
+      await tester.tap(amberSwatch);
+      await tester.pumpAndSettle();
+
+      expect(container.read(appSettingsProvider).accentColor, AppAccentColor.amber);
+      expect(container.read(appSettingsProvider).useDynamicColor, isFalse);
+
+      container.dispose();
+    });
   });
 }
