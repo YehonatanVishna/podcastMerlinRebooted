@@ -1481,6 +1481,59 @@ void main() {
       expect(service.isEpisodeActive(savedEp.id!) || service.isEpisodeQueued(savedEp.id!), isTrue);
       await service.pauseAll();
     });
+
+    test('cancelAllActive cancels all active and queued downloads for 100 episodes', () async {
+      final podId = await db.insertOrUpdatePodcast(
+        Podcast(
+          rssUrl: '$serverUrl/bulk_feed.xml',
+          title: '100 Episodes Pod',
+          description: '',
+          imageUrl: '',
+          link: '',
+          lastUpdated: DateTime.now(),
+        ),
+      );
+
+      final episodes = List.generate(
+        100,
+        (i) => Episode(
+          podcastId: podId,
+          guid: 'ep-bulk-cancel-$i',
+          title: 'Bulk Cancel $i',
+          mediaUrl: '$serverUrl/pause_test.mp3?ep=$i',
+          description: '',
+          imageUrl: '',
+          podcastRss: '',
+        ),
+      );
+
+      await db.insertEpisodes(episodes);
+      final savedEps = await db.getEpisodesForPodcast(podId);
+      expect(savedEps.length, 100);
+
+      for (final ep in savedEps) {
+        await service.startDownload(ep);
+      }
+
+      expect(service.activeAndQueuedCount, 100);
+      expect(service.queuedEpisodes.length, 98);
+
+      await service.cancelAllActive();
+
+      expect(service.activeAndQueuedCount, 0);
+      expect(service.queuedEpisodes, isEmpty);
+      expect(
+        service.currentTasks.values
+            .where((t) => t.status != DownloadStatus.none && t.status != DownloadStatus.downloaded),
+        isEmpty,
+      );
+
+      final dbEps = await db.getEpisodesForPodcast(podId);
+      for (final ep in dbEps) {
+        expect(ep.downloadStatus, DownloadStatus.none);
+        expect(ep.downloadPath, isNull);
+      }
+    });
   });
 
   group('DownloadCenterView UI & Widget Tests', () {

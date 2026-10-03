@@ -189,7 +189,7 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
             icon: const Icon(Icons.more_vert),
             onSelected: (val) {
               if (val == 'cancel_all') {
-                downloadService.cancelAllActive();
+                _confirmCancelAllActive(context, downloadService);
               } else if (val == 'clear_all') {
                 _showClearAllDialog(context);
               } else if (val == 'refresh') {
@@ -645,6 +645,14 @@ class _DownloadCenterViewState extends ConsumerState<DownloadCenterView>
     );
     if (confirmed == true) {
       await service.cancelAllActive();
+      ref.invalidate(downloadStorageUsageBytesProvider);
+      ref.invalidate(downloadedEpisodesListProvider);
+      ref.invalidate(failedEpisodesListProvider);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('All downloads cancelled')),
+        );
+      }
     }
   }
 

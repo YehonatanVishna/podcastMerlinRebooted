@@ -64,6 +64,8 @@ class EpisodeDownloadService {
   final List<Episode> _queuedEpisodes = [];
   final Map<int, DateTime> _lastProgressUpdate = {};
   final Map<int, DownloadTaskEvent> _currentTasks = {};
+  bool _isCancellingAll = false;
+  bool _cancelAutoDownload = false;
 
   final StreamController<DownloadTaskEvent> _eventController =
       StreamController<DownloadTaskEvent>.broadcast();
@@ -323,6 +325,19 @@ class EpisodeDownloadService {
     final cancelToken = existingCancelToken ?? CancelToken();
     _activeDownloads[epId] = cancelToken;
 
+    if (cancelToken.isCancelled || _isCancellingAll) {
+      _activeDownloads.remove(epId);
+      await _db.clearEpisodeDownload(epId);
+      _emitEvent(
+        DownloadTaskEvent(
+          episodeId: epId,
+          mediaUrl: episode.mediaUrl,
+          status: DownloadStatus.none,
+        ),
+      );
+      return;
+    }
+
     if (!await isNetworkAllowedForDownload()) {
       _activeDownloads.remove(epId);
       await _db.updateEpisodeDownloadState(
@@ -365,13 +380,39 @@ class EpisodeDownloadService {
       return;
     }
 
-      final downloadsDir = await getDownloadsDirectory();
-      final fileName = _sanitizeFileName(episode.mediaUrl, epId);
-      final finalFilePath = p.join(downloadsDir.path, fileName);
-      final partFilePath = '$finalFilePath.part';
+    if (cancelToken.isCancelled || _isCancellingAll) {
+      _activeDownloads.remove(epId);
+      await _db.clearEpisodeDownload(epId);
+      _emitEvent(
+        DownloadTaskEvent(
+          episodeId: epId,
+          mediaUrl: episode.mediaUrl,
+          status: DownloadStatus.none,
+        ),
+      );
+      return;
+    }
 
-      int retryCount = 0;
-      const int maxRetries = 3;
+    final downloadsDir = await getDownloadsDirectory();
+    final fileName = _sanitizeFileName(episode.mediaUrl, epId);
+    final finalFilePath = p.join(downloadsDir.path, fileName);
+    final partFilePath = '$finalFilePath.part';
+
+    int retryCount = 0;
+    const int maxRetries = 3;
+
+    if (cancelToken.isCancelled || _isCancellingAll) {
+      _activeDownloads.remove(epId);
+      await _db.clearEpisodeDownload(epId);
+      _emitEvent(
+        DownloadTaskEvent(
+          episodeId: epId,
+          mediaUrl: episode.mediaUrl,
+          status: DownloadStatus.none,
+        ),
+      );
+      return;
+    }
 
     await _db.updateEpisodeDownloadState(
       epId,
@@ -800,6 +841,7 @@ class EpisodeDownloadService {
   }
 
   void _processNextQueueItem() {
+    if (_isCancellingAll) return;
     if (_activeDownloads.length < maxConcurrentDownloads && _queuedEpisodes.isNotEmpty) {
       final next = _queuedEpisodes.removeAt(0);
       final cancelToken = CancelToken();
@@ -820,10 +862,12 @@ class EpisodeDownloadService {
     final maxPerShow = maxEpisodesPerSubscription ?? 3;
     if (maxPerShow <= 0) return 0;
 
+    _cancelAutoDownload = false;
     int queuedCount = 0;
     try {
       final podcasts = await _db.getAllPodcasts();
       for (final pod in podcasts) {
+        if (_cancelAutoDownload || _isCancellingAll) break;
         if (pod.id == null) continue;
         final episodes = await _db.getEpisodesForPodcast(
           pod.id!,
@@ -832,6 +876,7 @@ class EpisodeDownloadService {
           filter: onlyUnplayed ? EpisodeFilter.unplayed : EpisodeFilter.all,
         );
         for (final ep in episodes) {
+          if (_cancelAutoDownload || _isCancellingAll) break;
           final epId = ep.id;
           if (epId == null) continue;
           if (ep.isDownloaded || isEpisodeActive(epId) || isEpisodeQueued(epId)) {
@@ -856,6 +901,7 @@ class EpisodeDownloadService {
     final maxEpisodesToFetch = maxEpisodes ?? 3;
     if (maxEpisodesToFetch <= 0) return 0;
 
+    _cancelAutoDownload = false;
     int queuedCount = 0;
     try {
       final episodes = await _db.getEpisodesForPodcast(
@@ -865,6 +911,7 @@ class EpisodeDownloadService {
         filter: onlyUnplayed ? EpisodeFilter.unplayed : EpisodeFilter.all,
       );
       for (final ep in episodes) {
+        if (_cancelAutoDownload || _isCancellingAll) break;
         final epId = ep.id;
         if (epId == null) continue;
         if (ep.isDownloaded || isEpisodeActive(epId) || isEpisodeQueued(epId)) {
@@ -951,8 +998,22 @@ class EpisodeDownloadService {
     final queued = List<Episode>.from(_queuedEpisodes);
     _queuedEpisodes.clear();
     for (final ep in queued) {
-      if (ep.id != null) {
-        await pauseDownload(ep.id!);
+      final epId = ep.id;
+      if (epId != null) {
+        _pausedEpisodeIds.add(epId);
+        await _db.updateEpisodeDownloadState(
+          epId,
+          status: DownloadStatus.paused,
+        );
+        _emitEvent(
+          DownloadTaskEvent(
+            episodeId: epId,
+            mediaUrl: ep.mediaUrl,
+            episodeTitle: ep.title,
+            imageUrl: ep.imageUrl,
+            status: DownloadStatus.paused,
+          ),
+        );
       }
     }
     final activeIds = List<int>.from(_activeDownloads.keys);
@@ -993,16 +1054,91 @@ class EpisodeDownloadService {
   }
 
   Future<void> cancelAllActive() async {
-    final queued = List<Episode>.from(_queuedEpisodes);
-    _queuedEpisodes.clear();
-    for (final ep in queued) {
-      if (ep.id != null) {
-        await cancelDownload(ep.id!);
+    _isCancellingAll = true;
+    _cancelAutoDownload = true;
+    try {
+      // 1. Drain and cancel all in-memory queued episodes
+      final queued = List<Episode>.from(_queuedEpisodes);
+      _queuedEpisodes.clear();
+      for (final ep in queued) {
+        final epId = ep.id;
+        if (epId != null) {
+          _pausedEpisodeIds.remove(epId);
+          await _db.clearEpisodeDownload(epId);
+          _emitEvent(
+            DownloadTaskEvent(
+              episodeId: epId,
+              mediaUrl: ep.mediaUrl,
+              episodeTitle: ep.title,
+              imageUrl: ep.imageUrl,
+              status: DownloadStatus.none,
+            ),
+          );
+        }
       }
-    }
-    final activeIds = List<int>.from(_activeDownloads.keys);
-    for (final id in activeIds) {
-      await cancelDownload(id);
+
+      // 2. Cancel all active downloads
+      final activeTokens = Map<int, CancelToken>.from(_activeDownloads);
+      for (final entry in activeTokens.entries) {
+        final epId = entry.key;
+        final token = entry.value;
+        _pausedEpisodeIds.remove(epId);
+        token.cancel('Cancelled by user');
+        await _db.clearEpisodeDownload(epId);
+        _emitEvent(
+          DownloadTaskEvent(
+            episodeId: epId,
+            mediaUrl: _currentTasks[epId]?.mediaUrl ?? '',
+            status: DownloadStatus.none,
+          ),
+        );
+      }
+
+      // 3. Clear any remaining tasks in _currentTasks that are queued, downloading, or paused
+      final remainingIds = _currentTasks.keys.toList();
+      for (final epId in remainingIds) {
+        final task = _currentTasks[epId];
+        if (task != null &&
+            (task.status == DownloadStatus.queued ||
+             task.status == DownloadStatus.downloading ||
+             task.status == DownloadStatus.paused)) {
+          _pausedEpisodeIds.remove(epId);
+          await _db.clearEpisodeDownload(epId);
+          _emitEvent(
+            DownloadTaskEvent(
+              episodeId: epId,
+              mediaUrl: task.mediaUrl,
+              status: DownloadStatus.none,
+            ),
+          );
+        }
+      }
+
+      // 4. Reset any remaining queued/downloading episodes in the database
+      try {
+        final db = await _db.database;
+        await db.update(
+          'episodes',
+          {
+            'downloadStatus': DownloadStatus.none.name,
+            'downloadPath': null,
+            'downloadProgress': 0.0,
+            'downloadedBytes': 0,
+            'totalBytes': 0,
+            'downloadError': null,
+          },
+          where: 'downloadStatus IN (?, ?, ?)',
+          whereArgs: [
+            DownloadStatus.queued.name,
+            DownloadStatus.downloading.name,
+            DownloadStatus.paused.name,
+          ],
+        );
+      } catch (e) {
+        if (kDebugMode) print('Error resetting queued downloads in DB: $e');
+      }
+    } finally {
+      _isCancellingAll = false;
     }
   }
 
@@ -1032,7 +1168,18 @@ class EpisodeDownloadService {
           status: DownloadStatus.none,
         ),
       );
+      return;
     }
+
+    final task = _currentTasks[episodeId];
+    await _db.clearEpisodeDownload(episodeId);
+    _emitEvent(
+      DownloadTaskEvent(
+        episodeId: episodeId,
+        mediaUrl: task?.mediaUrl ?? '',
+        status: DownloadStatus.none,
+      ),
+    );
   }
 
   Future<void> deleteDownload(Episode episode) async {
