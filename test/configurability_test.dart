@@ -457,11 +457,30 @@ void main() {
       final purpleTop = tester.getTopLeft(purpleSwatch).dy;
       expect((amberTop - purpleTop).abs() < 1.0, isTrue, reason: 'Swatches should be in a horizontal row, not stacked vertically');
 
+      // 1. When useDynamicColor is true, no accent color swatch should display a checkmark (auto-deselected)
+      final swatchCheckmark = find.descendant(
+        of: find.byType(CircleAvatar),
+        matching: find.byIcon(Icons.check),
+      );
+      expect(container.read(appSettingsProvider).useDynamicColor, isTrue);
+      expect(swatchCheckmark, findsNothing);
+
+      // 2. Tapping an accent color should disable dynamic color and select that swatch
       await tester.tap(amberSwatch);
       await tester.pumpAndSettle();
 
       expect(container.read(appSettingsProvider).accentColor, AppAccentColor.amber);
       expect(container.read(appSettingsProvider).useDynamicColor, isFalse);
+      expect(swatchCheckmark, findsOneWidget);
+
+      // 3. Re-enabling system theme color should auto-deselect the swatch again
+      final dynamicColorSwitch = find.widgetWithText(SwitchListTile, 'Use system theme color');
+      await tester.ensureVisible(dynamicColorSwitch);
+      await tester.tap(dynamicColorSwitch);
+      await tester.pumpAndSettle();
+
+      expect(container.read(appSettingsProvider).useDynamicColor, isTrue);
+      expect(swatchCheckmark, findsNothing);
 
       container.dispose();
     });

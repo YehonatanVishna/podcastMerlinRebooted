@@ -287,7 +287,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           spacing: 12,
                           runSpacing: 12,
                           children: AppAccentColor.values.map((accent) {
-                            final isSelected = settings.accentColor == accent;
+                            final isSelected = !settings.useDynamicColor && settings.accentColor == accent;
                             return Tooltip(
                               message: accent.label,
                               child: SizedBox(
@@ -297,19 +297,23 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                                   onTap: () => settingsNotifier.setAccentColor(accent),
                                   radius: 24,
                                   child: Center(
-                                    child: Container(
-                                      padding: const EdgeInsets.all(3),
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: isSelected ? Theme.of(context).colorScheme.primary : Colors.transparent,
-                                          width: 2,
+                                    child: AnimatedOpacity(
+                                      duration: const Duration(milliseconds: 200),
+                                      opacity: settings.useDynamicColor ? 0.65 : 1.0,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(3),
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: isSelected ? Theme.of(context).colorScheme.primary : Colors.transparent,
+                                            width: 2,
+                                          ),
                                         ),
-                                      ),
-                                      child: CircleAvatar(
-                                        radius: 14,
-                                        backgroundColor: accent.color,
-                                        child: isSelected ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
+                                        child: CircleAvatar(
+                                          radius: 14,
+                                          backgroundColor: accent.color,
+                                          child: isSelected ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
+                                        ),
                                       ),
                                     ),
                                   ),
