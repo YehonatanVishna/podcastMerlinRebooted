@@ -30,6 +30,10 @@ class SyncService {
         _db = db ?? DatabaseHelper.instance,
         _rssParser = rssParser ?? RssFeedParser();
 
+  Future<void> clearCredentials() async {
+    await _storage.clearNextcloudCredentials();
+  }
+
   /// Full synchronization workflow (Ping server first; if online -> push backlog & pull changes; if offline -> parse existing subscriptions directly)
   Future<bool> performFullSync({
     SyncProgressCallback? onProgress,

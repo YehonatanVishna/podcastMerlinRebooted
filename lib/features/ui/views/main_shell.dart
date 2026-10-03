@@ -186,6 +186,15 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<int>(
+      appSettingsProvider.select((s) => s.periodicSyncIntervalMinutes),
+      (previous, next) {
+        if (previous != next) {
+          _setupPeriodicSync();
+        }
+      },
+    );
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final isDesktop = constraints.maxWidth >= ResponsiveBreakpoints.desktopNavRail;

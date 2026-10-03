@@ -341,37 +341,78 @@ class AppSettings {
       return PreferredSearchProvider.itunes;
     }
 
+    bool parseBool(dynamic val, bool fallback) {
+      if (val is bool) return val;
+      if (val is String) {
+        if (val.toLowerCase() == 'true') return true;
+        if (val.toLowerCase() == 'false') return false;
+      }
+      return fallback;
+    }
+
+    int parseInt(dynamic val, int fallback) {
+      if (val is int) return val;
+      if (val is num) return val.toInt();
+      if (val is String) {
+        final parsed = int.tryParse(val);
+        if (parsed != null) return parsed;
+      }
+      return fallback;
+    }
+
+    double parseDouble(dynamic val, double fallback) {
+      if (val is double) return val;
+      if (val is num) return val.toDouble();
+      if (val is String) {
+        final parsed = double.tryParse(val);
+        if (parsed != null) return parsed;
+      }
+      return fallback;
+    }
+
+    String parseString(dynamic val, String fallback) {
+      if (val is String) return val;
+      return fallback;
+    }
+
+    String? parseNullableString(dynamic val) {
+      if (val is String && val.isNotEmpty) return val;
+      return null;
+    }
+
+    final autoDel = parseAutoDelete(json['autoDeletePlayed']);
+    final defaultAutoDeleteAfterPlay = (autoDel != AutoDeletePlayedPolicy.never);
+
     return AppSettings(
       themeMode: parseTheme(json['themeMode']),
       accentColor: parseAccent(json['accentColor']),
       defaultLandingTab: parseTab(json['defaultLandingTab']),
-      compactEpisodeRows: json['compactEpisodeRows'] as bool? ?? false,
+      compactEpisodeRows: parseBool(json['compactEpisodeRows'], false),
       defaultEpisodeSort: parseSort(json['defaultEpisodeSort']),
-      hideCompletedEpisodes: json['hideCompletedEpisodes'] as bool? ?? false,
-      defaultPlaybackSpeed: (json['defaultPlaybackSpeed'] as num?)?.toDouble() ?? 1.0,
-      autoAdvanceQueue: json['autoAdvanceQueue'] as bool? ?? true,
-      markAsPlayedThresholdSeconds: json['markAsPlayedThresholdSeconds'] as int? ?? 60,
+      hideCompletedEpisodes: parseBool(json['hideCompletedEpisodes'], false),
+      defaultPlaybackSpeed: parseDouble(json['defaultPlaybackSpeed'], 1.0),
+      autoAdvanceQueue: parseBool(json['autoAdvanceQueue'], true),
+      markAsPlayedThresholdSeconds: parseInt(json['markAsPlayedThresholdSeconds'], 60),
       audioFocusLossAction: parseFocus(json['audioFocusLossAction']),
-      sleepTimerFadeOutSeconds: json['sleepTimerFadeOutSeconds'] as int? ?? 15,
-      skipSilence: json['skipSilence'] as bool? ?? false,
-      rewindDurationSeconds: json['rewindDurationSeconds'] as int? ?? 10,
-      fastForwardDurationSeconds: json['fastForwardDurationSeconds'] as int? ?? 30,
-      downloadWifiOnly: json['downloadWifiOnly'] as bool? ?? true,
-      maxConcurrentDownloads: json['maxConcurrentDownloads'] as int? ?? 2,
-      autoDeletePlayed: parseAutoDelete(json['autoDeletePlayed']),
-      autoDeleteAfterPlay: json['autoDeleteAfterPlay'] as bool? ??
-          (parseAutoDelete(json['autoDeletePlayed']) != AutoDeletePlayedPolicy.never),
-      autoDownloadNewEpisodes: json['autoDownloadNewEpisodes'] as bool? ?? false,
-      autoDownloadMaxPerShow: json['autoDownloadMaxPerShow'] as int? ?? 3,
-      maxStorageQuotaGb: json['maxStorageQuotaGb'] as int? ?? 10,
-      customDownloadPath: json['customDownloadPath'] as String?,
-      syncOnLaunch: json['syncOnLaunch'] as bool? ?? true,
-      periodicSyncIntervalMinutes: json['periodicSyncIntervalMinutes'] as int? ?? 180,
+      sleepTimerFadeOutSeconds: parseInt(json['sleepTimerFadeOutSeconds'], 15),
+      skipSilence: parseBool(json['skipSilence'], false),
+      rewindDurationSeconds: parseInt(json['rewindDurationSeconds'], 10),
+      fastForwardDurationSeconds: parseInt(json['fastForwardDurationSeconds'], 30),
+      downloadWifiOnly: parseBool(json['downloadWifiOnly'], true),
+      maxConcurrentDownloads: parseInt(json['maxConcurrentDownloads'], 2),
+      autoDeletePlayed: autoDel,
+      autoDeleteAfterPlay: parseBool(json['autoDeleteAfterPlay'], defaultAutoDeleteAfterPlay),
+      autoDownloadNewEpisodes: parseBool(json['autoDownloadNewEpisodes'], false),
+      autoDownloadMaxPerShow: parseInt(json['autoDownloadMaxPerShow'], 3),
+      maxStorageQuotaGb: parseInt(json['maxStorageQuotaGb'], 10),
+      customDownloadPath: parseNullableString(json['customDownloadPath']),
+      syncOnLaunch: parseBool(json['syncOnLaunch'], true),
+      periodicSyncIntervalMinutes: parseInt(json['periodicSyncIntervalMinutes'], 180),
       syncConflictPolicy: parseSyncConflict(json['syncConflictPolicy']),
-      deviceId: json['deviceId'] as String? ?? 'podcast_merlin_flutter',
+      deviceId: parseString(json['deviceId'], 'podcast_merlin_flutter'),
       preferredSearchProvider: parseSearchProvider(json['preferredSearchProvider']),
-      podcastIndexApiKey: json['podcastIndexApiKey'] as String? ?? '',
-      podcastIndexApiSecret: json['podcastIndexApiSecret'] as String? ?? '',
+      podcastIndexApiKey: parseString(json['podcastIndexApiKey'], ''),
+      podcastIndexApiSecret: parseString(json['podcastIndexApiSecret'], ''),
     );
   }
 }

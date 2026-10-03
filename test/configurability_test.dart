@@ -124,6 +124,35 @@ void main() {
       expect(parsed.podcastIndexApiSecret, 'my_secret');
     });
 
+    test('fromJson gracefully falls back to defaults when encountering unknown enum values or corrupted types', () {
+      final corruptedJson = {
+        'themeMode': 'ultra_neon_rainbow',
+        'accentColor': 'iridescent_glow',
+        'defaultLandingTab': 'quantum_dimension',
+        'defaultEpisodeSort': 'random_shuffle',
+        'audioFocusLossAction': 'explode_phone',
+        'autoDeletePlayed': 'after_100_years',
+        'syncConflictPolicy': 'nuclear_option',
+        'preferredSearchProvider': 'napster',
+        'defaultPlaybackSpeed': 'not_a_number',
+        'markAsPlayedThresholdSeconds': 'invalid_int',
+        'compactEpisodeRows': 'not_a_bool',
+      };
+
+      final parsed = AppSettings.fromJson(corruptedJson);
+      expect(parsed.themeMode, AppThemeMode.system);
+      expect(parsed.accentColor, AppAccentColor.purple);
+      expect(parsed.defaultLandingTab, DefaultLandingTab.catalog);
+      expect(parsed.defaultEpisodeSort, EpisodeSortOrder.newestFirst);
+      expect(parsed.audioFocusLossAction, AutoFocusLossAction.pauseAndResume);
+      expect(parsed.autoDeletePlayed, AutoDeletePlayedPolicy.immediately);
+      expect(parsed.syncConflictPolicy, SyncConflictPolicy.furthestPosition);
+      expect(parsed.preferredSearchProvider, PreferredSearchProvider.itunes);
+      expect(parsed.defaultPlaybackSpeed, 1.0);
+      expect(parsed.markAsPlayedThresholdSeconds, 60);
+      expect(parsed.compactEpisodeRows, isFalse);
+    });
+
     test('ThemeMode conversion maps amoled to ThemeMode.dark', () {
       expect(AppThemeMode.system.toThemeMode(), ThemeMode.system);
       expect(AppThemeMode.light.toThemeMode(), ThemeMode.light);
@@ -176,6 +205,9 @@ void main() {
       notifier.setAutoDownloadMaxPerShow(5);
       expect(container.read(appSettingsProvider).autoDownloadMaxPerShow, 5);
       expect(container.read(appSettingsProvider).autoDownloadEpisodesPerShow, 5);
+
+      // Wait for async persistence to complete
+      await Future<void>.delayed(const Duration(milliseconds: 10));
 
       // Verify persistence written to storage
       final storedJson = await mockStorage.read('merlin_app_settings_v1');

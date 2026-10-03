@@ -309,37 +309,37 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration.speech());
 
-      _interruptionSub = session.interruptionEventStream.listen((event) {
+      _interruptionSub = session.interruptionEventStream.listen((event) async {
         if (event.begin) {
           switch (event.type) {
             case AudioInterruptionType.duck:
               if (audioFocusLossAction == AutoFocusLossAction.duck) {
-                _player.setVolume(0.5);
+                await _player.setVolume(0.5).catchError((_) {});
               } else {
                 _wasPlayingBeforeInterruption = _player.playing;
-                pause();
+                await pause();
               }
               break;
             case AudioInterruptionType.pause:
             case AudioInterruptionType.unknown:
               _wasPlayingBeforeInterruption = _player.playing;
-              pause();
+              await pause();
               break;
           }
         } else {
           switch (event.type) {
             case AudioInterruptionType.duck:
               if (audioFocusLossAction == AutoFocusLossAction.duck) {
-                _player.setVolume(1.0);
+                await _player.setVolume(1.0).catchError((_) {});
               } else {
                 if (_wasPlayingBeforeInterruption) {
-                  play();
+                  await play();
                 }
               }
               break;
             case AudioInterruptionType.pause:
               if (_wasPlayingBeforeInterruption) {
-                play();
+                await play();
               }
               break;
             case AudioInterruptionType.unknown:
@@ -348,8 +348,8 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         }
       });
 
-      _becomingNoisySub = session.becomingNoisyEventStream.listen((_) {
-        pause();
+      _becomingNoisySub = session.becomingNoisyEventStream.listen((_) async {
+        await pause();
       });
     } catch (e) {
       if (kDebugMode) print('AudioSession initialization error: $e');

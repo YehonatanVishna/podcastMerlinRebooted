@@ -186,10 +186,19 @@ final audioHandlerProvider = Provider<MerlinAudioHandler>((ref) {
 class PodcastsNotifier extends StateNotifier<AsyncValue<List<Podcast>>> {
   final DatabaseHelper _db;
   final SyncStatusNotifier _syncStatusNotifier;
-  final Ref? _ref;
+  final EpisodeDownloadService? _downloadService;
+  final AppSettings Function()? _getSettings;
   StreamSubscription<SyncStatusState>? _syncSub;
 
-  PodcastsNotifier(this._db, this._syncStatusNotifier, [this._ref]) : super(const AsyncValue.loading()) {
+  PodcastsNotifier(
+    this._db,
+    this._syncStatusNotifier, {
+    EpisodeDownloadService? downloadService,
+    AppSettings Function()? getSettings,
+    Ref? ref,
+  })  : _downloadService = downloadService ?? ref?.read(episodeDownloadServiceProvider),
+        _getSettings = getSettings ?? (ref == null ? null : () => ref.read(appSettingsProvider)),
+        super(const AsyncValue.loading()) {
     loadPodcasts();
     _syncSub = _syncStatusNotifier.stream.listen((syncState) {
       if (!syncState.isSyncing && syncState.stage == SyncStage.completed) {
@@ -200,11 +209,12 @@ class PodcastsNotifier extends StateNotifier<AsyncValue<List<Podcast>>> {
   }
 
   void _triggerAutoDownloadIfEnabled({int? podcastId}) {
-    if (_ref == null) return;
+    final downloadService = _downloadService;
+    final getSettings = _getSettings;
+    if (downloadService == null || getSettings == null) return;
     try {
-      final settings = _ref.read(appSettingsProvider);
+      final settings = getSettings();
       if (settings.autoDownloadNewEpisodes) {
-        final downloadService = _ref.read(episodeDownloadServiceProvider);
         if (podcastId != null) {
           downloadService.autoDownloadForPodcast(
             podcastId,
@@ -280,7 +290,8 @@ final podcastsNotifierProvider =
   return PodcastsNotifier(
     ref.watch(databaseProvider),
     ref.watch(syncStatusNotifierProvider.notifier),
-    ref,
+    downloadService: ref.watch(episodeDownloadServiceProvider),
+    getSettings: () => ref.read(appSettingsProvider),
   );
 });
 
@@ -326,7 +337,8 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
   final MerlinAudioHandler _audioHandler;
   final EpisodeDownloadService? _downloadService;
   final int? _podcastId;
-  final AppSettings? _settings;
+  final EpisodeSortOrder _defaultEpisodeSort;
+  final bool _hideCompletedEpisodes;
   StreamSubscription<PositionUpdateEvent>? _posSub;
   StreamSubscription<SyncStatusState>? _syncSub;
   StreamSubscription<DownloadTaskEvent>? _downloadSub;
@@ -339,8 +351,10 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
     this._podcastId, {
     this._downloadService,
     AppSettings? settings,
-  // ignore: prefer_initializing_formals
-  })  : _settings = settings,
+    EpisodeSortOrder? defaultEpisodeSort,
+    bool? hideCompletedEpisodes,
+  })  : _defaultEpisodeSort = defaultEpisodeSort ?? settings?.defaultEpisodeSort ?? EpisodeSortOrder.newestFirst,
+        _hideCompletedEpisodes = hideCompletedEpisodes ?? settings?.hideCompletedEpisodes ?? false,
         super(const EpisodesState(isLoading: true)) {
     loadEpisodes();
     _posSub = _audioHandler.onPositionUpdated.listen((event) {
@@ -410,8 +424,8 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
     try {
       final podcastId = _podcastId;
       final fetchLimit = state.episodes.length > pageSize ? state.episodes.length : pageSize;
-      final sortDesc = _settings?.defaultEpisodeSort.isDescending ?? true;
-      final hideComp = _settings?.hideCompletedEpisodes ?? false;
+      final sortDesc = _defaultEpisodeSort.isDescending;
+      final hideComp = _hideCompletedEpisodes;
 
       final list = podcastId != null
           ? await _db.getEpisodesForPodcast(
@@ -453,8 +467,8 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
     try {
       final offset = state.episodes.length;
       final podcastId = _podcastId;
-      final sortDesc = _settings?.defaultEpisodeSort.isDescending ?? true;
-      final hideComp = _settings?.hideCompletedEpisodes ?? false;
+      final sortDesc = _defaultEpisodeSort.isDescending;
+      final hideComp = _hideCompletedEpisodes;
 
       final newEpisodes = podcastId != null
           ? await _db.getEpisodesForPodcast(
@@ -611,13 +625,17 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
 
 final episodesNotifierProvider = StateNotifierProvider.autoDispose
     .family<EpisodesNotifier, EpisodesState, int?>((ref, podcastId) {
+  final sortOrder = ref.watch(appSettingsProvider.select((s) => s.defaultEpisodeSort));
+  final hideCompleted = ref.watch(appSettingsProvider.select((s) => s.hideCompletedEpisodes));
+
   return EpisodesNotifier(
     ref.watch(databaseProvider),
     ref.watch(syncStatusNotifierProvider.notifier),
     ref.watch(audioHandlerProvider),
     podcastId,
     downloadService: ref.watch(episodeDownloadServiceProvider),
-    settings: ref.watch(appSettingsProvider),
+    defaultEpisodeSort: sortOrder,
+    hideCompletedEpisodes: hideCompleted,
   );
 });
 

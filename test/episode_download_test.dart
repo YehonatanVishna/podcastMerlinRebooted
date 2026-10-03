@@ -802,6 +802,18 @@ void main() {
       final queuedCount = await service.autoDownloadSubscriptions(maxEpisodesPerSubscription: 2);
       expect(queuedCount, 2);
 
+      final dbEp1 = await db.getEpisodeByGuid('autodl_1');
+      final dbEp2 = await db.getEpisodeByGuid('autodl_2');
+      final dbEp3 = await db.getEpisodeByGuid('autodl_3');
+      expect(dbEp1, isNotNull);
+      expect(dbEp2, isNotNull);
+      expect(dbEp3, isNotNull);
+
+      // Verify ep3 (newest) and ep2 (second newest) were queued, while ep1 (oldest) was omitted
+      expect(service.isEpisodeActive(dbEp3!.id!) || service.isEpisodeQueued(dbEp3.id!), isTrue);
+      expect(service.isEpisodeActive(dbEp2!.id!) || service.isEpisodeQueued(dbEp2.id!), isTrue);
+      expect(service.isEpisodeActive(dbEp1!.id!) || service.isEpisodeQueued(dbEp1.id!), isFalse);
+
       // Re-invoking should queue 0 because they are already active or queued
       final secondRun = await service.autoDownloadSubscriptions(maxEpisodesPerSubscription: 2);
       expect(secondRun, 0);
@@ -831,6 +843,70 @@ void main() {
 
       final singleQueued = await service.autoDownloadForPodcast(pod2Id, maxEpisodes: 1);
       expect(singleQueued, 1);
+    });
+
+    test('autoDownloadSubscriptions skips already downloaded and completed/played episodes', () async {
+      final podId = await db.insertOrUpdatePodcast(
+        Podcast(
+          rssUrl: 'https://example.com/autodl_skip.xml',
+          title: 'AutoDL Skip Show',
+          description: '',
+          imageUrl: '',
+          link: '',
+          lastUpdated: DateTime.now(),
+        ),
+      );
+
+      final now = DateTime.now();
+      // ep1: newest, but already downloaded
+      final ep1 = Episode(
+        podcastId: podId,
+        guid: 'autodl_skip_1',
+        title: 'Already Downloaded Ep',
+        mediaUrl: '$serverUrl/sample.mp3?skip=1',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_skip.xml',
+        publishedAt: now.subtract(const Duration(hours: 1)),
+        downloadStatus: DownloadStatus.downloaded,
+        downloadPath: '/fake/path.mp3',
+      );
+      // ep2: next newest, but already played
+      final ep2 = Episode(
+        podcastId: podId,
+        guid: 'autodl_skip_2',
+        title: 'Already Played Ep',
+        mediaUrl: '$serverUrl/sample.mp3?skip=2',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_skip.xml',
+        publishedAt: now.subtract(const Duration(hours: 2)),
+        isPlayed: true,
+      );
+      // ep3: unplayed and not downloaded
+      final ep3 = Episode(
+        podcastId: podId,
+        guid: 'autodl_skip_3',
+        title: 'Unplayed Candidate Ep',
+        mediaUrl: '$serverUrl/sample.mp3?skip=3',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_skip.xml',
+        publishedAt: now.subtract(const Duration(hours: 3)),
+      );
+
+      await db.insertEpisodes([ep1, ep2, ep3]);
+
+      // When requesting max 2 unplayed episodes, ep1 (downloaded) and ep2 (played) must be skipped,
+      // and only ep3 should be queued
+      final queuedCount = await service.autoDownloadSubscriptions(
+        maxEpisodesPerSubscription: 2,
+        onlyUnplayed: true,
+      );
+      expect(queuedCount, 1);
+
+      final dbEp3 = await db.getEpisodeByGuid('autodl_skip_3');
+      expect(service.isEpisodeActive(dbEp3!.id!) || service.isEpisodeQueued(dbEp3.id!), isTrue);
     });
   });
 

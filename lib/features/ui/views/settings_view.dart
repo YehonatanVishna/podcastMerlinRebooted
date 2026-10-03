@@ -25,6 +25,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
   bool _isLoading = true;
   bool _isTesting = false;
+  bool _obscurePodcastIndexSecret = true;
   String? _statusMessage;
   bool _isSuccessStatus = false;
   int? _imageCacheBytes;
@@ -62,7 +63,11 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       if (mounted) {
         setState(() => _imageCacheBytes = bytes);
       }
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) {
+        setState(() => _imageCacheBytes = -1);
+      }
+    }
   }
 
   @override
@@ -230,7 +235,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                       children: [
                         DropdownButtonFormField<PreferredSearchProvider>(
                           isExpanded: true,
-                          initialValue: settings.preferredSearchProvider,
+                          initialValue: PreferredSearchProvider.values.contains(settings.preferredSearchProvider)
+                              ? settings.preferredSearchProvider
+                              : PreferredSearchProvider.itunes,
                           decoration: const InputDecoration(
                             labelText: 'Preferred Search Provider',
                             border: OutlineInputBorder(),
@@ -255,11 +262,24 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         const SizedBox(height: 12),
                         TextField(
                           controller: _podcastIndexSecretController,
-                          obscureText: true,
-                          decoration: const InputDecoration(
+                          obscureText: _obscurePodcastIndexSecret,
+                          decoration: InputDecoration(
                             labelText: 'Custom Podcast Index API Secret (Optional)',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.password_outlined),
+                            border: const OutlineInputBorder(),
+                            prefixIcon: const Icon(Icons.password_outlined),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscurePodcastIndexSecret
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                              ),
+                              tooltip: _obscurePodcastIndexSecret ? 'Show secret' : 'Hide secret',
+                              onPressed: () {
+                                setState(() {
+                                  _obscurePodcastIndexSecret = !_obscurePodcastIndexSecret;
+                                });
+                              },
+                            ),
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -348,8 +368,12 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                                   Text(
                                     _imageCacheBytes == null
                                         ? 'Calculating...'
-                                        : '${_formatBytes(_imageCacheBytes!)} cached artwork',
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
+                                        : (_imageCacheBytes! < 0
+                                            ? 'Error reading cache'
+                                            : '${_formatBytes(_imageCacheBytes!)} cached artwork'),
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: _imageCacheBytes != null && _imageCacheBytes! < 0 ? Colors.red : Colors.grey,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -373,13 +397,15 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         const Divider(),
                         DropdownButtonFormField<int>(
                           isExpanded: true,
-                          initialValue: settings.maxConcurrentDownloads,
+                          initialValue: const [1, 2, 3, 4, 5].contains(settings.maxConcurrentDownloads)
+                              ? settings.maxConcurrentDownloads
+                              : 2,
                           decoration: const InputDecoration(
                             labelText: 'Max Concurrent Downloads',
                             border: OutlineInputBorder(),
                             prefixIcon: Icon(Icons.speed),
                           ),
-                          items: [1, 2, 3, 4, 5]
+                          items: const [1, 2, 3, 4, 5]
                               .map((c) => DropdownMenuItem(value: c, child: Text('$c simultaneous downloads')))
                               .toList(),
                           onChanged: (val) {
@@ -398,7 +424,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           const SizedBox(height: 8),
                           DropdownButtonFormField<AutoDeletePlayedPolicy>(
                             isExpanded: true,
-                            initialValue: settings.autoDeletePlayed,
+                            initialValue: AutoDeletePlayedPolicy.values.contains(settings.autoDeletePlayed)
+                                ? settings.autoDeletePlayed
+                                : AutoDeletePlayedPolicy.immediately,
                             decoration: const InputDecoration(
                               labelText: 'Auto-Delete Cleanup Schedule',
                               border: OutlineInputBorder(),
@@ -415,7 +443,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         const SizedBox(height: 16),
                         DropdownButtonFormField<int>(
                           isExpanded: true,
-                          initialValue: settings.maxStorageQuotaGb,
+                          initialValue: const [0, 2, 5, 10, 20].contains(settings.maxStorageQuotaGb)
+                              ? settings.maxStorageQuotaGb
+                              : 10,
                           decoration: const InputDecoration(
                             labelText: 'Download Storage Quota',
                             border: OutlineInputBorder(),
@@ -451,7 +481,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           const SizedBox(height: 8),
                           DropdownButtonFormField<int>(
                             isExpanded: true,
-                            initialValue: settings.autoDownloadMaxPerShow,
+                            initialValue: const [1, 2, 3, 5, 10].contains(settings.autoDownloadMaxPerShow)
+                                ? settings.autoDownloadMaxPerShow
+                                : 3,
                             decoration: const InputDecoration(
                               labelText: 'Episodes Per Subscription to Keep Downloaded',
                               border: OutlineInputBorder(),
@@ -558,7 +590,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         const Divider(),
                         DropdownButtonFormField<DefaultLandingTab>(
                           isExpanded: true,
-                          initialValue: settings.defaultLandingTab,
+                          initialValue: DefaultLandingTab.values.contains(settings.defaultLandingTab)
+                              ? settings.defaultLandingTab
+                              : DefaultLandingTab.catalog,
                           decoration: const InputDecoration(
                             labelText: 'Default Startup Tab',
                             border: OutlineInputBorder(),
@@ -574,7 +608,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         const SizedBox(height: 16),
                         DropdownButtonFormField<EpisodeSortOrder>(
                           isExpanded: true,
-                          initialValue: settings.defaultEpisodeSort,
+                          initialValue: EpisodeSortOrder.values.contains(settings.defaultEpisodeSort)
+                              ? settings.defaultEpisodeSort
+                              : EpisodeSortOrder.newestFirst,
                           decoration: const InputDecoration(
                             labelText: 'Default Episode Sort Order',
                             border: OutlineInputBorder(),
@@ -641,7 +677,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                             final isNarrow = constraints.maxWidth < 500;
                             final rewindDropdown = DropdownButtonFormField<int>(
                               isExpanded: true,
-                              initialValue: settings.rewindDurationSeconds,
+                              initialValue: const [5, 10, 15, 30, 45, 60].contains(settings.rewindDurationSeconds)
+                                  ? settings.rewindDurationSeconds
+                                  : 10,
                               decoration: const InputDecoration(
                                 labelText: 'Rewind Interval',
                                 border: OutlineInputBorder(),
@@ -657,7 +695,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
                             final fastForwardDropdown = DropdownButtonFormField<int>(
                               isExpanded: true,
-                              initialValue: settings.fastForwardDurationSeconds,
+                              initialValue: const [5, 10, 15, 30, 45, 60].contains(settings.fastForwardDurationSeconds)
+                                  ? settings.fastForwardDurationSeconds
+                                  : 30,
                               decoration: const InputDecoration(
                                 labelText: 'Fast Forward Interval',
                                 border: OutlineInputBorder(),
@@ -692,7 +732,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         const SizedBox(height: 16),
                         DropdownButtonFormField<int>(
                           isExpanded: true,
-                          initialValue: settings.markAsPlayedThresholdSeconds,
+                          initialValue: const [0, 30, 60, 90, 120].contains(settings.markAsPlayedThresholdSeconds)
+                              ? settings.markAsPlayedThresholdSeconds
+                              : 60,
                           decoration: const InputDecoration(
                             labelText: 'Mark-as-Played Outro Buffer',
                             border: OutlineInputBorder(),
@@ -713,7 +755,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         const SizedBox(height: 16),
                         DropdownButtonFormField<AutoFocusLossAction>(
                           isExpanded: true,
-                          initialValue: settings.audioFocusLossAction,
+                          initialValue: AutoFocusLossAction.values.contains(settings.audioFocusLossAction)
+                              ? settings.audioFocusLossAction
+                              : AutoFocusLossAction.pauseAndResume,
                           decoration: const InputDecoration(
                             labelText: 'Audio Focus Loss Action',
                             border: OutlineInputBorder(),
@@ -730,7 +774,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         const SizedBox(height: 16),
                         DropdownButtonFormField<int>(
                           isExpanded: true,
-                          initialValue: settings.sleepTimerFadeOutSeconds,
+                          initialValue: const [0, 10, 15, 30].contains(settings.sleepTimerFadeOutSeconds)
+                              ? settings.sleepTimerFadeOutSeconds
+                              : 15,
                           decoration: const InputDecoration(
                             labelText: 'Sleep Timer Fade-Out',
                             border: OutlineInputBorder(),
@@ -787,22 +833,28 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                _serverController.text.trim().isEmpty
-                                    ? 'Standalone Local Mode (No server required)'
-                                    : 'Nextcloud gPodder Sync Mode',
-                                style: TextStyle(
-                                  color: _serverController.text.trim().isEmpty
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Colors.green,
-                                  fontWeight: FontWeight.bold,
+                        ListenableBuilder(
+                          listenable: _serverController,
+                          builder: (context, _) {
+                            final isLocal = _serverController.text.trim().isEmpty;
+                            return Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    isLocal
+                                        ? 'Standalone Local Mode (No server required)'
+                                        : 'Nextcloud gPodder Sync Mode',
+                                    style: TextStyle(
+                                      color: isLocal
+                                          ? Theme.of(context).colorScheme.primary
+                                          : Colors.green,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                          ],
+                              ],
+                            );
+                          },
                         ),
                         const SizedBox(height: 12),
                         TextField(
@@ -813,7 +865,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                             border: OutlineInputBorder(),
                             prefixIcon: Icon(Icons.cloud),
                           ),
-                          onChanged: (_) => setState(() {}),
                         ),
                         const SizedBox(height: 12),
                         TextField(
@@ -823,7 +874,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                             border: OutlineInputBorder(),
                             prefixIcon: Icon(Icons.person),
                           ),
-                          onChanged: (_) => setState(() {}),
                         ),
                         const SizedBox(height: 12),
                         TextField(
@@ -834,7 +884,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                             border: OutlineInputBorder(),
                             prefixIcon: Icon(Icons.lock),
                           ),
-                          onChanged: (_) => setState(() {}),
                         ),
                         const SizedBox(height: 12),
                         TextField(
@@ -885,107 +934,107 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         ],
                         Consumer(
                           builder: (context, ref, child) {
-                            final syncState = ref.watch(syncStatusNotifierProvider);
-                            final isSyncing = syncState.isSyncing;
-                            final isConfigured = _serverController.text.trim().isNotEmpty &&
-                                _userController.text.trim().isNotEmpty;
+                            return ListenableBuilder(
+                              listenable: Listenable.merge([_serverController, _userController]),
+                              builder: (context, _) {
+                                final syncState = ref.watch(syncStatusNotifierProvider);
+                                final isSyncing = syncState.isSyncing;
+                                final isConfigured = _serverController.text.trim().isNotEmpty &&
+                                    _userController.text.trim().isNotEmpty;
 
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                if (isSyncing) ...[
-                                  Row(
-                                    children: [
-                                      const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    if (isSyncing) ...[
+                                      Row(
+                                        children: [
+                                          const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              syncState.currentTask ?? (isConfigured ? 'Syncing with gPodder...' : 'Refreshing local feeds...'),
+                                              style: Theme.of(context).textTheme.bodySmall,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          syncState.currentTask ?? (isConfigured ? 'Syncing with gPodder...' : 'Refreshing local feeds...'),
-                                          style: Theme.of(context).textTheme.bodySmall,
-                                        ),
+                                      const SizedBox(height: 12),
+                                    ],
+                                    FilledButton.icon(
+                                      icon: isSyncing
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                            )
+                                          : const Icon(Icons.sync),
+                                      label: Text(
+                                        isSyncing
+                                            ? 'Processing...'
+                                            : (isConfigured ? 'Save & Sync with gPodder' : 'Refresh Local Feeds (Local Mode)'),
+                                      ),
+                                      onPressed: isSyncing
+                                          ? null
+                                          : () async {
+                                              await _saveCredentials();
+                                              ref.read(podcastsNotifierProvider.notifier).refreshAll();
+                                            },
+                                    ),
+                                    if (isConfigured) ...[
+                                      const SizedBox(height: 8),
+                                      TextButton.icon(
+                                        icon: const Icon(Icons.refresh),
+                                        label: const Text('Force Full Re-sync (Retrieve all played positions)'),
+                                        onPressed: isSyncing
+                                            ? null
+                                            : () async {
+                                                await _saveCredentials();
+                                                ref.read(podcastsNotifierProvider.notifier).refreshAll(forceFullResync: true);
+                                              },
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: OutlinedButton.icon(
+                                              icon: _isTesting
+                                                  ? const SizedBox(
+                                                      width: 18,
+                                                      height: 18,
+                                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                                    )
+                                                  : const Icon(Icons.cloud_done),
+                                              label: const Text('Test Connection'),
+                                              onPressed: _isTesting ? null : _testConnection,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: OutlinedButton.icon(
+                                              icon: const Icon(Icons.cloud_off, color: Colors.red),
+                                              label: const Text('Use Local Only'),
+                                              onPressed: () async {
+                                                await ref.read(syncServiceProvider).clearCredentials();
+                                                setState(() {
+                                                  _serverController.clear();
+                                                  _userController.clear();
+                                                  _passwordController.clear();
+                                                  _statusMessage = 'Switched to standalone Local Mode.';
+                                                  _isSuccessStatus = true;
+                                                });
+                                              },
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ],
-                                  ),
-                                  const SizedBox(height: 12),
-                                ],
-                                FilledButton.icon(
-                                  icon: isSyncing
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                        )
-                                      : const Icon(Icons.sync),
-                                  label: Text(
-                                    isSyncing
-                                        ? 'Processing...'
-                                        : (isConfigured ? 'Save & Sync with gPodder' : 'Refresh Local Feeds (Local Mode)'),
-                                  ),
-                                  onPressed: isSyncing
-                                      ? null
-                                      : () async {
-                                          await _saveCredentials();
-                                          ref.read(podcastsNotifierProvider.notifier).refreshAll();
-                                        },
-                                ),
-                                if (isConfigured) ...[
-                                  const SizedBox(height: 8),
-                                  TextButton.icon(
-                                    icon: const Icon(Icons.refresh),
-                                    label: const Text('Force Full Re-sync (Retrieve all played positions)'),
-                                    onPressed: isSyncing
-                                        ? null
-                                        : () async {
-                                            await _saveCredentials();
-                                            ref.read(podcastsNotifierProvider.notifier).refreshAll(forceFullResync: true);
-                                          },
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: OutlinedButton.icon(
-                                          icon: _isTesting
-                                              ? const SizedBox(
-                                                  width: 18,
-                                                  height: 18,
-                                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                                )
-                                              : const Icon(Icons.cloud_done),
-                                          label: const Text('Test Connection'),
-                                          onPressed: _isTesting ? null : _testConnection,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: OutlinedButton.icon(
-                                          icon: const Icon(Icons.cloud_off, color: Colors.red),
-                                          label: const Text('Use Local Only'),
-                                          onPressed: () async {
-                                            final storage = ref.read(secureStorageProvider);
-                                            await storage.delete(SecureStorageService.keyServerUrl);
-                                            await storage.delete(SecureStorageService.keyUsername);
-                                            await storage.delete(SecureStorageService.keyPassword);
-                                            await storage.delete(SecureStorageService.keyLastSubscriptionTimestamp);
-                                            await storage.delete(SecureStorageService.keyLastActionTimestamp);
-                                            setState(() {
-                                              _serverController.clear();
-                                              _userController.clear();
-                                              _passwordController.clear();
-                                              _statusMessage = 'Switched to standalone Local Mode.';
-                                              _isSuccessStatus = true;
-                                            });
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ],
+                                  ],
+                                );
+                              },
                             );
                           },
                         ),
@@ -993,7 +1042,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         const Divider(),
                         DropdownButtonFormField<int>(
                           isExpanded: true,
-                          initialValue: settings.periodicSyncIntervalMinutes,
+                          initialValue: const [0, 60, 180, 360, 720].contains(settings.periodicSyncIntervalMinutes)
+                              ? settings.periodicSyncIntervalMinutes
+                              : 180,
                           decoration: const InputDecoration(
                             labelText: 'Periodic Background Sync',
                             border: OutlineInputBorder(),
@@ -1013,7 +1064,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         const SizedBox(height: 16),
                         DropdownButtonFormField<SyncConflictPolicy>(
                           isExpanded: true,
-                          initialValue: settings.syncConflictPolicy,
+                          initialValue: SyncConflictPolicy.values.contains(settings.syncConflictPolicy)
+                              ? settings.syncConflictPolicy
+                              : SyncConflictPolicy.furthestPosition,
                           decoration: const InputDecoration(
                             labelText: 'Sync Conflict Resolution',
                             border: OutlineInputBorder(),

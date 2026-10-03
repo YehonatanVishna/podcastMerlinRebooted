@@ -49,6 +49,14 @@ class SecureStorageService {
     await _deleteFallback(key);
   }
 
+  Future<void> clearNextcloudCredentials() async {
+    await delete(keyServerUrl);
+    await delete(keyUsername);
+    await delete(keyPassword);
+    await delete(keyLastSubscriptionTimestamp);
+    await delete(keyLastActionTimestamp);
+  }
+
   // --- FALLBACK FILE & MEMORY STORAGE ---
   static final Map<String, String> _memoryFallback = {};
 

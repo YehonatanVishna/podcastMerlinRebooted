@@ -57,6 +57,7 @@ class EpisodeDownloadService {
   String? customDownloadPath;
   AutoDeletePlayedPolicy autoDeletePlayed = AutoDeletePlayedPolicy.immediately;
   int maxStorageQuotaGb = 10;
+  Future<bool> Function()? isWifiConnectedChecker;
 
   final Map<int, CancelToken> _activeDownloads = {};
   final Set<int> _pausedEpisodeIds = <int>{};
@@ -77,6 +78,7 @@ class EpisodeDownloadService {
     Dio? dio,
     this.maxConcurrentDownloads = 2,
     Future<Directory> Function()? downloadDirResolver,
+    this.isWifiConnectedChecker,
   })  : _db = db ?? DatabaseHelper.instance,
         _dio = dio ??
             Dio(
@@ -258,7 +260,9 @@ class EpisodeDownloadService {
     }
 
     if (_activeDownloads.length < maxConcurrentDownloads) {
-      unawaited(_executeDownload(updatedEpisode));
+      final cancelToken = CancelToken();
+      _activeDownloads[epId] = cancelToken;
+      unawaited(_executeDownload(updatedEpisode, cancelToken));
     } else {
       _queuedEpisodes.add(updatedEpisode);
       await _db.updateEpisodeDownloadState(
@@ -278,18 +282,95 @@ class EpisodeDownloadService {
     }
   }
 
-  Future<void> _executeDownload(Episode episode) async {
+  Future<bool> isNetworkAllowedForDownload() async {
+    if (!downloadWifiOnly) return true;
+    if (isWifiConnectedChecker != null) {
+      return await isWifiConnectedChecker!();
+    }
+    return await _isWifiOrUnmetered();
+  }
+
+  Future<bool> _isWifiOrUnmetered() async {
+    try {
+      final interfaces = await NetworkInterface.list();
+      if (interfaces.isEmpty) return true;
+      for (final interface in interfaces) {
+        final name = interface.name.toLowerCase();
+        if (name.startsWith('wlan') ||
+            name.startsWith('wl') ||
+            name.startsWith('wifi') ||
+            name.startsWith('eth') ||
+            name.startsWith('en')) {
+          return true;
+        }
+      }
+      return true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<bool> isStorageQuotaExceeded() async {
+    if (maxStorageQuotaGb <= 0) return false;
+    final currentBytes = await getTotalDownloadStorageBytes();
+    final quotaBytes = maxStorageQuotaGb * 1024 * 1024 * 1024;
+    return currentBytes >= quotaBytes;
+  }
+
+  Future<void> _executeDownload(Episode episode, [CancelToken? existingCancelToken]) async {
     final epId = episode.id!;
-    final cancelToken = CancelToken();
+    final cancelToken = existingCancelToken ?? CancelToken();
     _activeDownloads[epId] = cancelToken;
 
-    final downloadsDir = await getDownloadsDirectory();
-    final fileName = _sanitizeFileName(episode.mediaUrl, epId);
-    final finalFilePath = p.join(downloadsDir.path, fileName);
-    final partFilePath = '$finalFilePath.part';
+    if (!await isNetworkAllowedForDownload()) {
+      _activeDownloads.remove(epId);
+      await _db.updateEpisodeDownloadState(
+        epId,
+        status: DownloadStatus.failed,
+        error: 'Download paused: Wi-Fi connection required',
+      );
+      _emitEvent(
+        DownloadTaskEvent(
+          episodeId: epId,
+          mediaUrl: episode.mediaUrl,
+          episodeTitle: episode.title,
+          imageUrl: episode.imageUrl,
+          status: DownloadStatus.failed,
+          error: 'Download paused: Wi-Fi connection required',
+        ),
+      );
+      _processNextQueueItem();
+      return;
+    }
 
-    int retryCount = 0;
-    const int maxRetries = 3;
+    if (await isStorageQuotaExceeded()) {
+      _activeDownloads.remove(epId);
+      await _db.updateEpisodeDownloadState(
+        epId,
+        status: DownloadStatus.failed,
+        error: 'Download failed: storage quota ($maxStorageQuotaGb GB) exceeded',
+      );
+      _emitEvent(
+        DownloadTaskEvent(
+          episodeId: epId,
+          mediaUrl: episode.mediaUrl,
+          episodeTitle: episode.title,
+          imageUrl: episode.imageUrl,
+          status: DownloadStatus.failed,
+          error: 'Download failed: storage quota ($maxStorageQuotaGb GB) exceeded',
+        ),
+      );
+      _processNextQueueItem();
+      return;
+    }
+
+      final downloadsDir = await getDownloadsDirectory();
+      final fileName = _sanitizeFileName(episode.mediaUrl, epId);
+      final finalFilePath = p.join(downloadsDir.path, fileName);
+      final partFilePath = '$finalFilePath.part';
+
+      int retryCount = 0;
+      const int maxRetries = 3;
 
     await _db.updateEpisodeDownloadState(
       epId,
@@ -719,7 +800,11 @@ class EpisodeDownloadService {
   void _processNextQueueItem() {
     if (_activeDownloads.length < maxConcurrentDownloads && _queuedEpisodes.isNotEmpty) {
       final next = _queuedEpisodes.removeAt(0);
-      _executeDownload(next);
+      final cancelToken = CancelToken();
+      if (next.id != null) {
+        _activeDownloads[next.id!] = cancelToken;
+      }
+      unawaited(_executeDownload(next, cancelToken));
     }
   }
 
