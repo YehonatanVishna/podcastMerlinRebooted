@@ -7,6 +7,8 @@ import '../../../core/models/episode.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../downloads/episode_download_service.dart';
 import 'cached_image.dart';
+import 'dopamine_switcher_sheet.dart';
+import 'dopamine_video_canvas.dart';
 import 'episode_description_sheet.dart';
 import 'playback_speed_sheet.dart';
 import 'queue_bottom_sheet.dart';
@@ -128,6 +130,7 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final audioHandler = ref.watch(audioHandlerProvider);
+    final settings = ref.watch(appSettingsProvider);
 
     return StreamBuilder<MediaItem?>(
       stream: audioHandler.mediaItem,
@@ -163,10 +166,11 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
               builder: (context, constraints) {
                 final maxSheetHeight = constraints.maxHeight;
                 final artSize = (maxSheetHeight * 0.35).clamp(160.0, 300.0);
+                final isNarrow = constraints.maxWidth < 360;
 
                 return SafeArea(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                    padding: EdgeInsets.symmetric(horizontal: isNarrow ? 8 : 24, vertical: 8),
                     child: SingleChildScrollView(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -208,33 +212,43 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
                             ],
                           ),
                           const SizedBox(height: 12),
-                          // Big Cover Artwork
+                          // Big Cover Artwork OR Dopamine Video Canvas
                           Center(
-                            child: Container(
-                              width: artSize,
-                              height: artSize,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(16),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: theme.brightness == Brightness.dark
-                                        ? Colors.black54
-                                        : Colors.black26,
-                                    blurRadius: 16,
-                                    offset: const Offset(0, 8),
+                            child: settings.dopamineModeEnabled
+                                ? DopamineVideoCanvas(
+                                    visualType: settings.dopamineVisualType,
+                                    videoPath: settings.selectedCustomVideo?.path,
+                                    playbackPosition: position,
+                                    isAudioPlaying: isPlaying,
+                                    width: artSize,
+                                    height: artSize,
+                                    borderRadius: BorderRadius.circular(16),
+                                  )
+                                : Container(
+                                    width: artSize,
+                                    height: artSize,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(16),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: theme.brightness == Brightness.dark
+                                              ? Colors.black54
+                                              : Colors.black26,
+                                          blurRadius: 16,
+                                          offset: const Offset(0, 8),
+                                        ),
+                                      ],
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: AppCachedImage(
+                                        imageUrl: imageUrl,
+                                        width: artSize,
+                                        height: artSize,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
                                   ),
-                                ],
-                              ),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: AppCachedImage(
-                                  imageUrl: imageUrl,
-                                  width: artSize,
-                                  height: artSize,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                            ),
                           ),
                           const SizedBox(height: 20),
                           // Title & Show metadata
@@ -425,6 +439,42 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
                                 icon: const Icon(Icons.speed),
                                 tooltip: 'Playback Speed',
                                 onPressed: () => PlaybackSpeedSheet.show(context),
+                              ),
+                              // Dopamine Mode toggle button
+                              SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: Tooltip(
+                                  message: settings.dopamineModeEnabled
+                                      ? 'Dopamine Mode: Enabled (Tap to toggle, hold to choose visuals)'
+                                      : 'Dopamine Mode: Disabled (Tap to enable, hold to choose visuals)',
+                                  triggerMode: TooltipTriggerMode.manual,
+                                  child: InkResponse(
+                                    radius: 24,
+                                    onTap: () {
+                                      final notifier = ref.read(appSettingsProvider.notifier);
+                                      final nextState = !settings.dopamineModeEnabled;
+                                      notifier.setDopamineModeEnabled(nextState);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          duration: const Duration(seconds: 2),
+                                          content: Text(
+                                            nextState
+                                                ? '⚡ Dopamine Mode activated!'
+                                                : 'Dopamine Mode deactivated.',
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    onLongPress: () => DopamineSwitcherSheet.show(context),
+                                    child: Center(
+                                      child: Icon(
+                                        settings.dopamineModeEnabled ? Icons.bolt : Icons.bolt_outlined,
+                                        color: settings.dopamineModeEnabled ? theme.colorScheme.primary : null,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ),
                               // Sleep Timer button
                               StreamBuilder<Duration?>(

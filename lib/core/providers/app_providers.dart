@@ -6,6 +6,7 @@ import '../models/podcast.dart';
 import '../models/gpodder_action.dart';
 import '../models/sync_status.dart';
 import '../models/app_settings.dart';
+import '../services/dopamine_video_service.dart';
 import '../services/image_cache_service.dart';
 import '../utils/error_formatter.dart';
 import '../../features/player/audio_player_service.dart';
@@ -20,10 +21,12 @@ import 'app_settings_provider.dart';
 
 export '../models/app_settings.dart';
 export 'app_settings_provider.dart';
+export '../services/dopamine_video_service.dart';
 
 final databaseProvider = Provider<DatabaseHelper>((ref) => DatabaseHelper.instance);
 final secureStorageProvider = Provider<SecureStorageService>((ref) => SecureStorageService());
 final apiClientProvider = Provider<GPodderApiClient>((ref) => GPodderApiClient());
+final dopamineVideoServiceProvider = Provider<DopamineVideoService>((ref) => DopamineVideoService());
 
 final episodeDownloadServiceProvider = Provider<EpisodeDownloadService>((ref) {
   final service = EpisodeDownloadService(

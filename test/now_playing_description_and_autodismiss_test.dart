@@ -10,6 +10,8 @@ import 'package:podcast_merlin_flutter/core/providers/app_providers.dart';
 import 'package:podcast_merlin_flutter/features/downloads/episode_download_service.dart';
 import 'package:podcast_merlin_flutter/features/player/audio_player_service.dart';
 import 'package:podcast_merlin_flutter/features/sync/sync_service.dart';
+import 'package:podcast_merlin_flutter/features/ui/widgets/dopamine_switcher_sheet.dart';
+import 'package:podcast_merlin_flutter/features/ui/widgets/dopamine_tunnel_canvas.dart';
 import 'package:podcast_merlin_flutter/features/ui/widgets/episode_description_sheet.dart';
 import 'package:podcast_merlin_flutter/features/ui/widgets/now_playing_sheet.dart';
 
@@ -143,6 +145,41 @@ void main() {
     expect(find.byType(EpisodeDescriptionSheet), findsOneWidget);
     expect(find.text('Episode 10 Auto-Dismiss Test'), findsWidgets);
     expect(find.textContaining('Detailed description of episode 10'), findsWidgets);
+  });
+
+  testWidgets('NowPlayingSheet renders Dopamine button, taps to toggle, and long-presses to open DopamineSwitcherSheet', (tester) async {
+    await tester.pumpWidget(buildTestApp());
+    await tester.pumpAndSettle();
+
+    // Verify Dopamine button icon exists
+    final disabledBtn = find.descendant(
+      of: find.byType(InkResponse),
+      matching: find.byIcon(Icons.bolt_outlined),
+    );
+    expect(disabledBtn, findsOneWidget);
+
+    // Tap to toggle dopamine mode on
+    await tester.tap(disabledBtn);
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // Dopamine canvas should now be displayed in place of artwork
+    expect(find.byType(DopamineTunnelCanvas), findsOneWidget);
+
+    // Now button icon should be active filled bolt
+    final activeBtn = find.descendant(
+      of: find.byType(InkResponse),
+      matching: find.byIcon(Icons.bolt),
+    );
+    expect(activeBtn, findsOneWidget);
+
+    // Long-press Dopamine button
+    await tester.longPress(activeBtn);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // DopamineSwitcherSheet modal bottom sheet should appear
+    expect(find.byType(DopamineSwitcherSheet), findsOneWidget);
+    expect(find.text('Dopamine Mode Visuals'), findsOneWidget);
   });
 
   test('AudioPlayerService clears currentEpisode and emits null mediaItem when queue is empty on playback completion', () async {

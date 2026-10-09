@@ -164,6 +164,47 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
   void setCompactEpisodeRows(bool compact) => _update((s) => s.copyWith(compactEpisodeRows: compact));
   void setDefaultEpisodeSort(EpisodeSortOrder sort) => _update((s) => s.copyWith(defaultEpisodeSort: sort));
   void setHideCompletedEpisodes(bool hide) => _update((s) => s.copyWith(hideCompletedEpisodes: hide));
+  void setDopamineModeEnabled(bool enabled) => _update((s) => s.copyWith(dopamineModeEnabled: enabled));
+  void setDopamineVisualType(DopamineVisualType type) => _update((s) => s.copyWith(dopamineVisualType: type));
+  void addCustomVideo(DopamineCustomVideo video) {
+    _update((s) {
+      final updatedList = [...s.dopamineCustomVideos.where((v) => v.id != video.id), video];
+      return s.copyWith(
+        dopamineCustomVideos: updatedList,
+        selectedCustomVideoId: video.id,
+        dopamineVisualType: DopamineVisualType.customVideo,
+      );
+    });
+  }
+
+  void removeCustomVideo(String videoId) {
+    _update((s) {
+      final updatedList = s.dopamineCustomVideos.where((v) => v.id != videoId).toList();
+      String? nextSelectedId = s.selectedCustomVideoId;
+      DopamineVisualType visualType = s.dopamineVisualType;
+      if (nextSelectedId == videoId) {
+        if (updatedList.isNotEmpty) {
+          nextSelectedId = updatedList.first.id;
+        } else {
+          nextSelectedId = null;
+          visualType = DopamineVisualType.proceduralTunnel;
+        }
+      }
+      return s.copyWith(
+        dopamineCustomVideos: updatedList,
+        selectedCustomVideoId: nextSelectedId,
+        clearSelectedCustomVideo: nextSelectedId == null,
+        dopamineVisualType: visualType,
+      );
+    });
+  }
+
+  void selectCustomVideo(String videoId) {
+    _update((s) => s.copyWith(
+      selectedCustomVideoId: videoId,
+      dopamineVisualType: DopamineVisualType.customVideo,
+    ));
+  }
 
   void setDefaultPlaybackSpeed(double speed) => _update((s) => s.copyWith(defaultPlaybackSpeed: speed));
   void setAutoAdvanceQueue(bool autoAdvance) => _update((s) => s.copyWith(autoAdvanceQueue: autoAdvance));

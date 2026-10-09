@@ -9,6 +9,7 @@ import 'core/database/ffi_init.dart';
 import 'core/providers/app_providers.dart';
 import 'core/theme/app_theme.dart';
 import 'package:dynamic_color/dynamic_color.dart';
+import 'package:media_kit/media_kit.dart';
 import 'features/player/audio_player_service.dart';
 import 'features/player/podcast_widget_service.dart';
 import 'features/ui/views/main_shell.dart';
@@ -33,6 +34,11 @@ void main() async {
 
   // Platform-safe FFI setup (noop on Web, sqflite_ffi on Desktop/Mobile)
   setupFfi();
+  try {
+    MediaKit.ensureInitialized();
+  } catch (e) {
+    debugPrint('MediaKit.ensureInitialized error: $e');
+  }
 
   // Initialize audio_service so the handler is registered with the platform's
   // media session (Android notification shade, lock-screen controls, etc.)

@@ -5,6 +5,7 @@ import '../../../core/providers/app_providers.dart';
 import '../../../core/services/image_cache_service.dart';
 import '../../sync/opml_ui_helper.dart';
 import '../../sync/secure_storage_service.dart';
+import '../widgets/dopamine_switcher_sheet.dart';
 import '../widgets/sync_error_banner.dart';
 import '../../../main.dart';
 
@@ -618,6 +619,71 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           value: settings.skipSilence,
                           onChanged: (val) => settingsNotifier.setSkipSilence(val),
                         ),
+                        const Divider(height: 24),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: Icon(Icons.bolt, color: Theme.of(context).colorScheme.primary),
+                          title: const Text('Dopamine Mode'),
+                          subtitle: const Text('Plays continuous hypnotic visuals or your own custom videos in the player to maintain focus'),
+                          value: settings.dopamineModeEnabled,
+                          onChanged: (val) => settingsNotifier.setDopamineModeEnabled(val),
+                        ),
+                        if (settings.dopamineModeEnabled) ...[
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<DopamineVisualType>(
+                            isExpanded: true,
+                            initialValue: settings.dopamineVisualType,
+                            decoration: const InputDecoration(
+                              labelText: 'Dopamine Visual Type',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.auto_awesome),
+                            ),
+                            items: DopamineVisualType.values
+                                .map((type) => DropdownMenuItem(
+                                      value: type,
+                                      child: Text(type.label),
+                                    ))
+                                .toList(),
+                            onChanged: (val) {
+                              if (val != null) settingsNotifier.setDopamineVisualType(val);
+                            },
+                          ),
+                          if (settings.dopamineVisualType == DopamineVisualType.customVideo) ...[
+                            const SizedBox(height: 12),
+                            if (settings.dopamineCustomVideos.isNotEmpty) ...[
+                              DropdownButtonFormField<String>(
+                                key: ValueKey(settings.selectedCustomVideo?.id),
+                                isExpanded: true,
+                                initialValue: settings.dopamineCustomVideos
+                                        .any((v) => v.id == settings.selectedCustomVideo?.id)
+                                    ? settings.selectedCustomVideo?.id
+                                    : null,
+                                decoration: const InputDecoration(
+                                  labelText: 'Active Custom Video',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.movie_outlined),
+                                ),
+                                items: settings.dopamineCustomVideos
+                                    .map((vid) => DropdownMenuItem(
+                                          value: vid.id,
+                                          child: Text(vid.name, overflow: TextOverflow.ellipsis),
+                                        ))
+                                    .toList(),
+                                onChanged: (val) {
+                                  if (val != null) settingsNotifier.selectCustomVideo(val);
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                            OutlinedButton.icon(
+                              icon: const Icon(Icons.video_library_outlined),
+                              label: Text(settings.dopamineCustomVideos.isEmpty
+                                  ? 'Upload Your First Video'
+                                  : 'Manage Video Library (${settings.dopamineCustomVideos.length})'),
+                              onPressed: () => DopamineSwitcherSheet.show(context),
+                            ),
+                          ],
+                        ],
                       ],
                     ),
                   ),

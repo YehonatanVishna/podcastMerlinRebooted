@@ -99,6 +99,54 @@ enum PreferredSearchProvider {
   const PreferredSearchProvider(this.label);
 }
 
+enum DopamineVisualType {
+  proceduralTunnel('Neon Warp Tunnel'),
+  customVideo('Custom Video');
+
+  final String label;
+  const DopamineVisualType(this.label);
+}
+
+class DopamineCustomVideo {
+  final String id;
+  final String name;
+  final String path;
+  final int sizeBytes;
+  final DateTime addedAt;
+
+  const DopamineCustomVideo({
+    required this.id,
+    required this.name,
+    required this.path,
+    required this.sizeBytes,
+    required this.addedAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'path': path,
+    'sizeBytes': sizeBytes,
+    'addedAt': addedAt.toIso8601String(),
+  };
+
+  factory DopamineCustomVideo.fromJson(Map<String, dynamic> json) => DopamineCustomVideo(
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? 'Custom Video',
+    path: json['path'] as String? ?? '',
+    sizeBytes: (json['sizeBytes'] as num?)?.toInt() ?? 0,
+    addedAt: DateTime.tryParse(json['addedAt'] as String? ?? '') ?? DateTime.now(),
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DopamineCustomVideo && runtimeType == other.runtimeType && id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
+}
+
 class AppSettings {
   // Theme & Appearance
   final AppThemeMode themeMode;
@@ -108,6 +156,22 @@ class AppSettings {
   final bool compactEpisodeRows;
   final EpisodeSortOrder defaultEpisodeSort;
   final bool hideCompletedEpisodes;
+
+  // Dopamine Mode
+  final bool dopamineModeEnabled;
+  final DopamineVisualType dopamineVisualType;
+  final List<DopamineCustomVideo> dopamineCustomVideos;
+  final String? selectedCustomVideoId;
+
+  DopamineCustomVideo? get selectedCustomVideo {
+    if (dopamineCustomVideos.isEmpty) return null;
+    if (selectedCustomVideoId != null) {
+      try {
+        return dopamineCustomVideos.firstWhere((v) => v.id == selectedCustomVideoId);
+      } catch (_) {}
+    }
+    return dopamineCustomVideos.first;
+  }
 
   // Playback & Audio
   final double defaultPlaybackSpeed;
@@ -150,6 +214,10 @@ class AppSettings {
     this.compactEpisodeRows = false,
     this.defaultEpisodeSort = EpisodeSortOrder.newestFirst,
     this.hideCompletedEpisodes = false,
+    this.dopamineModeEnabled = false,
+    this.dopamineVisualType = DopamineVisualType.proceduralTunnel,
+    this.dopamineCustomVideos = const [],
+    this.selectedCustomVideoId,
     this.defaultPlaybackSpeed = 1.0,
     this.autoAdvanceQueue = true,
     this.markAsPlayedThresholdSeconds = 60,
@@ -183,6 +251,11 @@ class AppSettings {
     bool? compactEpisodeRows,
     EpisodeSortOrder? defaultEpisodeSort,
     bool? hideCompletedEpisodes,
+    bool? dopamineModeEnabled,
+    DopamineVisualType? dopamineVisualType,
+    List<DopamineCustomVideo>? dopamineCustomVideos,
+    String? selectedCustomVideoId,
+    bool clearSelectedCustomVideo = false,
     double? defaultPlaybackSpeed,
     bool? autoAdvanceQueue,
     int? markAsPlayedThresholdSeconds,
@@ -228,6 +301,12 @@ class AppSettings {
       compactEpisodeRows: compactEpisodeRows ?? this.compactEpisodeRows,
       defaultEpisodeSort: defaultEpisodeSort ?? this.defaultEpisodeSort,
       hideCompletedEpisodes: hideCompletedEpisodes ?? this.hideCompletedEpisodes,
+      dopamineModeEnabled: dopamineModeEnabled ?? this.dopamineModeEnabled,
+      dopamineVisualType: dopamineVisualType ?? this.dopamineVisualType,
+      dopamineCustomVideos: dopamineCustomVideos ?? this.dopamineCustomVideos,
+      selectedCustomVideoId: clearSelectedCustomVideo
+          ? null
+          : (selectedCustomVideoId ?? this.selectedCustomVideoId),
       defaultPlaybackSpeed: defaultPlaybackSpeed ?? this.defaultPlaybackSpeed,
       autoAdvanceQueue: autoAdvanceQueue ?? this.autoAdvanceQueue,
       markAsPlayedThresholdSeconds: markAsPlayedThresholdSeconds ?? this.markAsPlayedThresholdSeconds,
@@ -263,6 +342,10 @@ class AppSettings {
       'compactEpisodeRows': compactEpisodeRows,
       'defaultEpisodeSort': defaultEpisodeSort.name,
       'hideCompletedEpisodes': hideCompletedEpisodes,
+      'dopamineModeEnabled': dopamineModeEnabled,
+      'dopamineVisualType': dopamineVisualType.name,
+      'dopamineCustomVideos': dopamineCustomVideos.map((v) => v.toJson()).toList(),
+      'selectedCustomVideoId': selectedCustomVideoId,
       'defaultPlaybackSpeed': defaultPlaybackSpeed,
       'autoAdvanceQueue': autoAdvanceQueue,
       'markAsPlayedThresholdSeconds': markAsPlayedThresholdSeconds,
@@ -346,6 +429,27 @@ class AppSettings {
       return PreferredSearchProvider.itunes;
     }
 
+    DopamineVisualType parseDopamineVisual(dynamic val) {
+      if (val is String) {
+        return DopamineVisualType.values.firstWhere(
+          (e) => e.name == val,
+          orElse: () => DopamineVisualType.proceduralTunnel,
+        );
+      }
+      return DopamineVisualType.proceduralTunnel;
+    }
+
+    List<DopamineCustomVideo> parseCustomVideos(dynamic val) {
+      if (val is List) {
+        return val
+            .whereType<Map<String, dynamic>>()
+            .map((e) => DopamineCustomVideo.fromJson(e))
+            .where((v) => v.id.isNotEmpty && v.path.isNotEmpty)
+            .toList();
+      }
+      return const [];
+    }
+
     bool parseBool(dynamic val, bool fallback) {
       if (val is bool) return val;
       if (val is String) {
@@ -396,6 +500,10 @@ class AppSettings {
       compactEpisodeRows: parseBool(json['compactEpisodeRows'], false),
       defaultEpisodeSort: parseSort(json['defaultEpisodeSort']),
       hideCompletedEpisodes: parseBool(json['hideCompletedEpisodes'], false),
+      dopamineModeEnabled: parseBool(json['dopamineModeEnabled'], false),
+      dopamineVisualType: parseDopamineVisual(json['dopamineVisualType'] ?? json['dopamineVideoSource']),
+      dopamineCustomVideos: parseCustomVideos(json['dopamineCustomVideos']),
+      selectedCustomVideoId: parseNullableString(json['selectedCustomVideoId']),
       defaultPlaybackSpeed: parseDouble(json['defaultPlaybackSpeed'], 1.0),
       autoAdvanceQueue: parseBool(json['autoAdvanceQueue'], true),
       markAsPlayedThresholdSeconds: parseInt(json['markAsPlayedThresholdSeconds'], 60),
