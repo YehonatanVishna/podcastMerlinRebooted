@@ -61,7 +61,6 @@ void main() {
       expect(settings.periodicSyncIntervalMinutes, 180);
       expect(settings.syncConflictPolicy, SyncConflictPolicy.furthestPosition);
       expect(settings.deviceId, 'podcast_merlin_flutter');
-      expect(settings.preferredSearchProvider, PreferredSearchProvider.itunes);
     });
 
     test('Json roundtrip serialization preserves all fields', () {
@@ -90,9 +89,6 @@ void main() {
         periodicSyncIntervalMinutes: 60,
         syncConflictPolicy: SyncConflictPolicy.latestTimestamp,
         deviceId: 'custom_device_id',
-        preferredSearchProvider: PreferredSearchProvider.podcastIndex,
-        podcastIndexApiKey: 'my_key',
-        podcastIndexApiSecret: 'my_secret',
       );
 
       final jsonMap = original.toJson();
@@ -122,9 +118,6 @@ void main() {
       expect(parsed.periodicSyncIntervalMinutes, 60);
       expect(parsed.syncConflictPolicy, SyncConflictPolicy.latestTimestamp);
       expect(parsed.deviceId, 'custom_device_id');
-      expect(parsed.preferredSearchProvider, PreferredSearchProvider.podcastIndex);
-      expect(parsed.podcastIndexApiKey, 'my_key');
-      expect(parsed.podcastIndexApiSecret, 'my_secret');
     });
 
     test('fromJson gracefully falls back to defaults when encountering unknown enum values or corrupted types', () {
@@ -136,7 +129,6 @@ void main() {
         'audioFocusLossAction': 'explode_phone',
         'autoDeletePlayed': 'after_100_years',
         'syncConflictPolicy': 'nuclear_option',
-        'preferredSearchProvider': 'napster',
         'defaultPlaybackSpeed': 'not_a_number',
         'markAsPlayedThresholdSeconds': 'invalid_int',
         'compactEpisodeRows': 'not_a_bool',
@@ -150,10 +142,23 @@ void main() {
       expect(parsed.audioFocusLossAction, AutoFocusLossAction.pauseAndResume);
       expect(parsed.autoDeletePlayed, AutoDeletePlayedPolicy.immediately);
       expect(parsed.syncConflictPolicy, SyncConflictPolicy.furthestPosition);
-      expect(parsed.preferredSearchProvider, PreferredSearchProvider.itunes);
       expect(parsed.defaultPlaybackSpeed, 1.0);
       expect(parsed.markAsPlayedThresholdSeconds, 60);
       expect(parsed.compactEpisodeRows, isFalse);
+    });
+
+    test('fromJson safely ignores legacy podcast index keys and preferredSearchProvider', () {
+      final legacyJson = {
+        'preferredSearchProvider': 'podcastIndex',
+        'podcastIndexApiKey': 'legacy_api_key_123',
+        'podcastIndexApiSecret': 'legacy_secret_456',
+        'themeMode': 'dark',
+        'defaultPlaybackSpeed': 1.5,
+      };
+
+      final parsed = AppSettings.fromJson(legacyJson);
+      expect(parsed.themeMode, AppThemeMode.dark);
+      expect(parsed.defaultPlaybackSpeed, 1.5);
     });
 
     test('ThemeMode conversion maps amoled to ThemeMode.dark', () {
@@ -308,8 +313,44 @@ void main() {
       await tester.drag(find.byType(SingleChildScrollView), const Offset(0, -600));
       await tester.pumpAndSettle();
 
-      expect(find.text('Discovery & OPML'), findsOneWidget);
-      expect(find.text('Save API Keys & Device ID'), findsOneWidget);
+      expect(find.text('Save Device ID'), findsOneWidget);
+      expect(find.text('OPML Management'), findsOneWidget);
+    });
+
+    testWidgets('Saving empty device ID displays error SnackBar', (tester) async {
+      final mockStorage = MockSecureStorage();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            secureStorageProvider.overrideWithValue(mockStorage),
+            downloadStorageUsageBytesProvider.overrideWith((ref) => Future.value(0)),
+            downloadedEpisodesCountProvider.overrideWith((ref) => Future.value(0)),
+          ],
+          child: const MaterialApp(
+            home: SettingsView(),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      // Scroll to view synchronization section where device ID is located
+      await tester.drag(find.byType(SingleChildScrollView), const Offset(0, -600));
+      await tester.pumpAndSettle();
+
+      final deviceIdField = find.widgetWithText(TextField, 'Client Device Identifier');
+      expect(deviceIdField, findsOneWidget);
+
+      await tester.enterText(deviceIdField, '   ');
+      await tester.pumpAndSettle();
+
+      final saveButton = find.widgetWithText(FilledButton, 'Save Device ID');
+      await tester.ensureVisible(saveButton);
+      await tester.tap(saveButton);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Device ID cannot be empty'), findsOneWidget);
     });
 
     testWidgets('Tapping theme choice chip updates appSettingsProvider', (tester) async {

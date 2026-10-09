@@ -10,7 +10,7 @@ A modern, cross-platform podcast player with native **Nextcloud Podcast** & **gP
 - 📜 **"Up Next" Queue**: Interactive, persistent playback queue with drag-and-drop reordering, swipe-to-remove, and automatic continuous playback.
 - 💤 **Sleep Timer**: Built-in sleep timer with presets (5–60m), real-time countdown badge, audio volume fade-out, and "End of Current Episode" mode.
 - ⚡ **Variable Speed & Seek Controls**: Fine-grained playback speed (0.5x to 3.0x in 0.1x steps) and user-configurable rewind and fast-forward intervals.
-- 🔍 **Multi-Source Discovery**: Search and discover shows via Apple Podcasts and Podcast Index directories.
+- 🔍 **Podcast Discovery**: Search and discover trending shows via Apple Podcasts directory.
 - 🖥️ **Desktop Ergonomics**: Adaptive desktop sidebar/rail, hardware mouse back/forward button navigation, Linux MPRIS integration, and Windows MSIX packaging.
 
 ---

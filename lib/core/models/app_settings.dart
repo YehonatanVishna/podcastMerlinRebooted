@@ -91,14 +91,6 @@ enum SyncConflictPolicy {
   const SyncConflictPolicy(this.label);
 }
 
-enum PreferredSearchProvider {
-  itunes('Apple Podcasts (iTunes)'),
-  podcastIndex('Podcast Index');
-
-  final String label;
-  const PreferredSearchProvider(this.label);
-}
-
 enum DopamineVisualType {
   proceduralTunnel('Neon Warp Tunnel'),
   customVideo('Custom Video');
@@ -202,9 +194,6 @@ class AppSettings {
   final int periodicSyncIntervalMinutes;
   final SyncConflictPolicy syncConflictPolicy;
   final String deviceId;
-  final PreferredSearchProvider preferredSearchProvider;
-  final String podcastIndexApiKey;
-  final String podcastIndexApiSecret;
 
   const AppSettings({
     this.themeMode = AppThemeMode.system,
@@ -238,9 +227,6 @@ class AppSettings {
     this.periodicSyncIntervalMinutes = 180,
     this.syncConflictPolicy = SyncConflictPolicy.furthestPosition,
     this.deviceId = 'podcast_merlin_flutter',
-    this.preferredSearchProvider = PreferredSearchProvider.itunes,
-    this.podcastIndexApiKey = '',
-    this.podcastIndexApiSecret = '',
   });
 
   AppSettings copyWith({
@@ -277,9 +263,6 @@ class AppSettings {
     int? periodicSyncIntervalMinutes,
     SyncConflictPolicy? syncConflictPolicy,
     String? deviceId,
-    PreferredSearchProvider? preferredSearchProvider,
-    String? podcastIndexApiKey,
-    String? podcastIndexApiSecret,
   }) {
     AutoDeletePlayedPolicy resolvedPolicy = autoDeletePlayed ?? this.autoDeletePlayed;
     bool resolvedAutoDeleteAfterPlay = autoDeleteAfterPlay ?? this.autoDeleteAfterPlay;
@@ -327,9 +310,6 @@ class AppSettings {
       periodicSyncIntervalMinutes: periodicSyncIntervalMinutes ?? this.periodicSyncIntervalMinutes,
       syncConflictPolicy: syncConflictPolicy ?? this.syncConflictPolicy,
       deviceId: deviceId ?? this.deviceId,
-      preferredSearchProvider: preferredSearchProvider ?? this.preferredSearchProvider,
-      podcastIndexApiKey: podcastIndexApiKey ?? this.podcastIndexApiKey,
-      podcastIndexApiSecret: podcastIndexApiSecret ?? this.podcastIndexApiSecret,
     );
   }
 
@@ -366,9 +346,6 @@ class AppSettings {
       'periodicSyncIntervalMinutes': periodicSyncIntervalMinutes,
       'syncConflictPolicy': syncConflictPolicy.name,
       'deviceId': deviceId,
-      'preferredSearchProvider': preferredSearchProvider.name,
-      'podcastIndexApiKey': podcastIndexApiKey,
-      'podcastIndexApiSecret': podcastIndexApiSecret,
     };
   }
 
@@ -420,13 +397,6 @@ class AppSettings {
         return SyncConflictPolicy.values.firstWhere((e) => e.name == val, orElse: () => SyncConflictPolicy.furthestPosition);
       }
       return SyncConflictPolicy.furthestPosition;
-    }
-
-    PreferredSearchProvider parseSearchProvider(dynamic val) {
-      if (val is String) {
-        return PreferredSearchProvider.values.firstWhere((e) => e.name == val, orElse: () => PreferredSearchProvider.itunes);
-      }
-      return PreferredSearchProvider.itunes;
     }
 
     DopamineVisualType parseDopamineVisual(dynamic val) {
@@ -524,9 +494,6 @@ class AppSettings {
       periodicSyncIntervalMinutes: parseInt(json['periodicSyncIntervalMinutes'], 180),
       syncConflictPolicy: parseSyncConflict(json['syncConflictPolicy']),
       deviceId: parseString(json['deviceId'], 'podcast_merlin_flutter'),
-      preferredSearchProvider: parseSearchProvider(json['preferredSearchProvider']),
-      podcastIndexApiKey: parseString(json['podcastIndexApiKey'], ''),
-      podcastIndexApiSecret: parseString(json['podcastIndexApiSecret'], ''),
     );
   }
 }

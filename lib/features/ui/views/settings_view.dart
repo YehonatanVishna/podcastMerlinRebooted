@@ -20,13 +20,10 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   final _serverController = TextEditingController();
   final _userController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _podcastIndexKeyController = TextEditingController();
-  final _podcastIndexSecretController = TextEditingController();
   final _deviceIdController = TextEditingController();
 
   bool _isLoading = true;
   bool _isTesting = false;
-  bool _obscurePodcastIndexSecret = true;
   String? _statusMessage;
   bool _isSuccessStatus = false;
   int? _imageCacheBytes;
@@ -50,8 +47,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     _serverController.text = await storage.read(SecureStorageService.keyServerUrl) ?? '';
     _userController.text = await storage.read(SecureStorageService.keyUsername) ?? '';
     _passwordController.text = await storage.read(SecureStorageService.keyPassword) ?? '';
-    _podcastIndexKeyController.text = settings.podcastIndexApiKey;
-    _podcastIndexSecretController.text = settings.podcastIndexApiSecret;
     _deviceIdController.text = settings.deviceId;
 
     _refreshImageCacheSize();
@@ -82,8 +77,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     _serverController.dispose();
     _userController.dispose();
     _passwordController.dispose();
-    _podcastIndexKeyController.dispose();
-    _podcastIndexSecretController.dispose();
     _deviceIdController.dispose();
     super.dispose();
   }
@@ -111,26 +104,32 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     }
   }
 
-  Future<void> _saveDiscoverySettings() async {
-    final settingsNotifier = ref.read(appSettingsProvider.notifier);
-    settingsNotifier.setPodcastIndexCredentials(
-      _podcastIndexKeyController.text.trim(),
-      _podcastIndexSecretController.text.trim(),
-    );
-    if (_deviceIdController.text.trim().isNotEmpty) {
-      settingsNotifier.setDeviceId(_deviceIdController.text.trim());
+  Future<bool> _saveDeviceId() async {
+    final deviceId = _deviceIdController.text.trim();
+    if (deviceId.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Device ID cannot be empty')),
+        );
+      }
+      return false;
     }
+
+    final settingsNotifier = ref.read(appSettingsProvider.notifier);
+    settingsNotifier.setDeviceId(deviceId);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('API Keys & Device ID saved')),
+        const SnackBar(content: Text('Device ID saved')),
       );
     }
+    return true;
   }
 
   Future<void> _saveCredentials() async {
     await _saveNextcloudCredentials();
-    await _saveDiscoverySettings();
+    final deviceIdSaved = await _saveDeviceId();
+    if (!deviceIdSaved) return;
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Settings saved successfully')),
@@ -1201,14 +1200,35 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           value: settings.syncOnLaunch,
                           onChanged: (val) => settingsNotifier.setSyncOnLaunch(val),
                         ),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _deviceIdController,
+                          decoration: const InputDecoration(
+                            labelText: 'Client Device Identifier',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.devices),
+                            helperText: 'Unique client identifier registered for gPodder sync',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: FilledButton.icon(
+                            icon: const Icon(Icons.save_outlined),
+                            label: const Text('Save Device ID'),
+                            onPressed: _saveDeviceId,
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 ),
                 const SizedBox(height: 24),
 
-                // 5. DISCOVERY & OPML
-                _buildSectionHeader('Discovery & OPML', Icons.explore_outlined),
+                // 5. OPML MANAGEMENT
+                _buildSectionHeader('OPML Management', Icons.folder_zip_outlined),
                 Card(
                   elevation: 0,
                   shape: RoundedRectangleBorder(
@@ -1220,89 +1240,13 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        DropdownButtonFormField<PreferredSearchProvider>(
-                          isExpanded: true,
-                          initialValue: PreferredSearchProvider.values.contains(settings.preferredSearchProvider)
-                              ? settings.preferredSearchProvider
-                              : PreferredSearchProvider.itunes,
-                          decoration: const InputDecoration(
-                            labelText: 'Preferred Search Provider',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.travel_explore),
-                          ),
-                          items: PreferredSearchProvider.values.map((p) {
-                            return DropdownMenuItem(value: p, child: Text(p.label));
-                          }).toList(),
-                          onChanged: (val) {
-                            if (val != null) settingsNotifier.setPreferredSearchProvider(val);
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: _podcastIndexKeyController,
-                          decoration: const InputDecoration(
-                            labelText: 'Custom Podcast Index API Key (Optional)',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.vpn_key_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _podcastIndexSecretController,
-                          obscureText: _obscurePodcastIndexSecret,
-                          decoration: InputDecoration(
-                            labelText: 'Custom Podcast Index API Secret (Optional)',
-                            border: const OutlineInputBorder(),
-                            prefixIcon: const Icon(Icons.password_outlined),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscurePodcastIndexSecret
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                              ),
-                              tooltip: _obscurePodcastIndexSecret ? 'Show secret' : 'Hide secret',
-                              onPressed: () {
-                                setState(() {
-                                  _obscurePodcastIndexSecret = !_obscurePodcastIndexSecret;
-                                });
-                              },
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _deviceIdController,
-                          decoration: const InputDecoration(
-                            labelText: 'Client Device Identifier',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.devices),
-                            helperText: 'Unique client identifier registered for Podcast Index and gPodder sync',
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: FilledButton.icon(
-                            icon: const Icon(Icons.save_outlined),
-                            label: const Text('Save API Keys & Device ID'),
-                            onPressed: _saveDiscoverySettings,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        const Divider(),
-                        const SizedBox(height: 8),
-                        Text(
-                          'OPML Management',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 4),
                         Text(
                           'Import subscriptions from or export them to an OPML 2.0 file, compatible with antennaPod, Pocket Casts, and Apple Podcasts.',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                               ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
                         LayoutBuilder(
                           builder: (context, constraints) {
                             final isNarrow = constraints.maxWidth < 500;
