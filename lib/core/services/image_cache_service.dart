@@ -227,4 +227,36 @@ class ImageCacheService {
     final file = await getCachedFile(url);
     return file?.path;
   }
+
+  /// Calculates total size of persistent disk image cache in bytes.
+  static Future<int> getCacheSizeBytes() async {
+    if (kIsWeb) return 0;
+    try {
+      final dir = await _getCacheDir();
+      int totalBytes = 0;
+      await for (final entity in dir.list(followLinks: false)) {
+        if (entity is File) {
+          totalBytes += await entity.length();
+        }
+      }
+      return totalBytes;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Clears all cached images on disk.
+  static Future<void> clearCache() async {
+    if (kIsWeb) return;
+    try {
+      final dir = await _getCacheDir();
+      await for (final entity in dir.list(followLinks: false)) {
+        if (entity is File) {
+          try {
+            await entity.delete();
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
 }

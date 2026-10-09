@@ -44,18 +44,38 @@ class MainShell extends ConsumerStatefulWidget {
 }
 
 class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserver {
-  final List<ShellNavigationState> _history = [
-    const ShellNavigationState(selectedIndex: 0, selectedPodcast: null),
-  ];
+  late final List<ShellNavigationState> _history;
   int _historyIndex = 0;
   StreamSubscription<String>? _playbackErrorSub;
+  Timer? _periodicSyncTimer;
+  Timer? _startupSyncTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    final landingIndex = ref.read(appSettingsProvider).defaultLandingTab.index;
+    _history = [ShellNavigationState(selectedIndex: landingIndex, selectedPodcast: null)];
+    _historyIndex = 0;
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+
+      // Eagerly instantiate download service so onEpisodeCompleted is hooked
+      ref.read(episodeDownloadServiceProvider);
+
+      final settings = ref.read(appSettingsProvider);
+
+      if (settings.syncOnLaunch) {
+        _startupSyncTimer = Timer(const Duration(seconds: 1), () {
+          if (mounted) {
+            ref.read(podcastsNotifierProvider.notifier).refreshAll();
+          }
+        });
+      }
+
+      _setupPeriodicSync();
+
       _playbackErrorSub = ref.read(audioHandlerProvider).onPlaybackError.listen((errorMsg) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -77,6 +97,19 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
     });
   }
 
+  void _setupPeriodicSync() {
+    _periodicSyncTimer?.cancel();
+    final settings = ref.read(appSettingsProvider);
+    final intervalMins = settings.periodicSyncIntervalMinutes;
+    if (intervalMins > 0) {
+      _periodicSyncTimer = Timer.periodic(Duration(minutes: intervalMins), (_) {
+        if (mounted) {
+          ref.read(podcastsNotifierProvider.notifier).refreshAll();
+        }
+      });
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
@@ -89,7 +122,9 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _startupSyncTimer?.cancel();
     _playbackErrorSub?.cancel();
+    _periodicSyncTimer?.cancel();
     super.dispose();
   }
 
@@ -147,6 +182,15 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<int>(
+      appSettingsProvider.select((s) => s.periodicSyncIntervalMinutes),
+      (previous, next) {
+        if (previous != next) {
+          _setupPeriodicSync();
+        }
+      },
+    );
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final isDesktop = constraints.maxWidth >= ResponsiveBreakpoints.desktopNavRail;

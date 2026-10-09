@@ -5,6 +5,8 @@ import '../models/episode.dart';
 import '../models/podcast.dart';
 import '../models/gpodder_action.dart';
 import '../models/sync_status.dart';
+import '../models/app_settings.dart';
+import '../services/dopamine_video_service.dart';
 import '../services/image_cache_service.dart';
 import '../utils/error_formatter.dart';
 import '../../features/player/audio_player_service.dart';
@@ -15,10 +17,16 @@ import '../../features/discovery/multisource_search_service.dart';
 import '../../features/discovery/podcast_index_provider.dart';
 import '../../features/discovery/discovery_notifier.dart';
 import '../../features/downloads/episode_download_service.dart';
+import 'app_settings_provider.dart';
+
+export '../models/app_settings.dart';
+export 'app_settings_provider.dart';
+export '../services/dopamine_video_service.dart';
 
 final databaseProvider = Provider<DatabaseHelper>((ref) => DatabaseHelper.instance);
 final secureStorageProvider = Provider<SecureStorageService>((ref) => SecureStorageService());
 final apiClientProvider = Provider<GPodderApiClient>((ref) => GPodderApiClient());
+final dopamineVideoServiceProvider = Provider<DopamineVideoService>((ref) => DopamineVideoService());
 
 final episodeDownloadServiceProvider = Provider<EpisodeDownloadService>((ref) {
   final service = EpisodeDownloadService(
@@ -41,6 +49,18 @@ final episodeDownloadServiceProvider = Provider<EpisodeDownloadService>((ref) {
       );
     } catch (_) {}
   });
+
+  try {
+    final handler = ref.read(audioHandlerProvider);
+    handler.onEpisodeCompleted = (episode) async {
+      try {
+        final settings = ref.read(appSettingsProvider);
+        if (settings.autoDeleteAfterPlay && settings.autoDeletePlayed == AutoDeletePlayedPolicy.immediately) {
+          await service.deleteDownload(episode);
+        }
+      } catch (_) {}
+    };
+  } catch (_) {}
 
   ref.onDispose(() {
     sub.cancel();
@@ -169,15 +189,47 @@ final audioHandlerProvider = Provider<MerlinAudioHandler>((ref) {
 class PodcastsNotifier extends StateNotifier<AsyncValue<List<Podcast>>> {
   final DatabaseHelper _db;
   final SyncStatusNotifier _syncStatusNotifier;
+  final EpisodeDownloadService? _downloadService;
+  final AppSettings Function()? _getSettings;
   StreamSubscription<SyncStatusState>? _syncSub;
 
-  PodcastsNotifier(this._db, this._syncStatusNotifier) : super(const AsyncValue.loading()) {
+  PodcastsNotifier(
+    this._db,
+    this._syncStatusNotifier, {
+    EpisodeDownloadService? downloadService,
+    AppSettings Function()? getSettings,
+    Ref? ref,
+  })  : _downloadService = downloadService ?? ref?.read(episodeDownloadServiceProvider),
+        _getSettings = getSettings ?? (ref == null ? null : () => ref.read(appSettingsProvider)),
+        super(const AsyncValue.loading()) {
     loadPodcasts();
     _syncSub = _syncStatusNotifier.stream.listen((syncState) {
       if (!syncState.isSyncing && syncState.stage == SyncStage.completed) {
         loadPodcasts();
+        _triggerAutoDownloadIfEnabled();
       }
     });
+  }
+
+  void _triggerAutoDownloadIfEnabled({int? podcastId}) {
+    final downloadService = _downloadService;
+    final getSettings = _getSettings;
+    if (downloadService == null || getSettings == null) return;
+    try {
+      final settings = getSettings();
+      if (settings.autoDownloadNewEpisodes) {
+        if (podcastId != null) {
+          downloadService.autoDownloadForPodcast(
+            podcastId,
+            maxEpisodes: settings.autoDownloadMaxPerShow,
+          );
+        } else {
+          downloadService.autoDownloadSubscriptions(
+            maxEpisodesPerSubscription: settings.autoDownloadMaxPerShow,
+          );
+        }
+      }
+    } catch (_) {}
   }
 
   @override
@@ -209,6 +261,7 @@ class PodcastsNotifier extends StateNotifier<AsyncValue<List<Podcast>>> {
     final saved = await _syncStatusNotifier.fetchAndSaveFeed(rssUrl);
     if (saved != null) {
       await loadPodcasts();
+      _triggerAutoDownloadIfEnabled(podcastId: saved.id);
       _syncStatusNotifier.pushBacklog().catchError((_) => false);
       return true;
     }
@@ -231,6 +284,7 @@ class PodcastsNotifier extends StateNotifier<AsyncValue<List<Podcast>>> {
   Future<void> refreshAll({bool forceFullResync = false}) async {
     await _syncStatusNotifier.performFullSync(forceFullResync: forceFullResync);
     await loadPodcasts();
+    _triggerAutoDownloadIfEnabled();
   }
 }
 
@@ -239,6 +293,8 @@ final podcastsNotifierProvider =
   return PodcastsNotifier(
     ref.watch(databaseProvider),
     ref.watch(syncStatusNotifierProvider.notifier),
+    downloadService: ref.watch(episodeDownloadServiceProvider),
+    getSettings: () => ref.read(appSettingsProvider),
   );
 });
 
@@ -284,6 +340,8 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
   final MerlinAudioHandler _audioHandler;
   final EpisodeDownloadService? _downloadService;
   final int? _podcastId;
+  final EpisodeSortOrder _defaultEpisodeSort;
+  final bool _hideCompletedEpisodes;
   StreamSubscription<PositionUpdateEvent>? _posSub;
   StreamSubscription<SyncStatusState>? _syncSub;
   StreamSubscription<DownloadTaskEvent>? _downloadSub;
@@ -295,7 +353,12 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
     this._audioHandler,
     this._podcastId, {
     this._downloadService,
-  }) : super(const EpisodesState(isLoading: true)) {
+    AppSettings? settings,
+    EpisodeSortOrder? defaultEpisodeSort,
+    bool? hideCompletedEpisodes,
+  })  : _defaultEpisodeSort = defaultEpisodeSort ?? settings?.defaultEpisodeSort ?? EpisodeSortOrder.newestFirst,
+        _hideCompletedEpisodes = hideCompletedEpisodes ?? settings?.hideCompletedEpisodes ?? false,
+        super(const EpisodesState(isLoading: true)) {
     loadEpisodes();
     _posSub = _audioHandler.onPositionUpdated.listen((event) {
       updateEpisodeProgress(event.mediaUrl, event.position, event.isPlayed);
@@ -364,9 +427,25 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
     try {
       final podcastId = _podcastId;
       final fetchLimit = state.episodes.length > pageSize ? state.episodes.length : pageSize;
+      final sortDesc = _defaultEpisodeSort.isDescending;
+      final hideComp = _hideCompletedEpisodes;
+
       final list = podcastId != null
-          ? await _db.getEpisodesForPodcast(podcastId, limit: fetchLimit, offset: 0, filter: currentFilter)
-          : await _db.getAllEpisodes(limit: fetchLimit, offset: 0, filter: currentFilter);
+          ? await _db.getEpisodesForPodcast(
+              podcastId,
+              limit: fetchLimit,
+              offset: 0,
+              filter: currentFilter,
+              sortDescending: sortDesc,
+              hideCompleted: hideComp,
+            )
+          : await _db.getAllEpisodes(
+              limit: fetchLimit,
+              offset: 0,
+              filter: currentFilter,
+              sortDescending: sortDesc,
+              hideCompleted: hideComp,
+            );
 
       if (mounted) {
         state = EpisodesState(
@@ -391,9 +470,25 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
     try {
       final offset = state.episodes.length;
       final podcastId = _podcastId;
+      final sortDesc = _defaultEpisodeSort.isDescending;
+      final hideComp = _hideCompletedEpisodes;
+
       final newEpisodes = podcastId != null
-          ? await _db.getEpisodesForPodcast(podcastId, limit: pageSize, offset: offset, filter: state.filter)
-          : await _db.getAllEpisodes(limit: pageSize, offset: offset, filter: state.filter);
+          ? await _db.getEpisodesForPodcast(
+              podcastId,
+              limit: pageSize,
+              offset: offset,
+              filter: state.filter,
+              sortDescending: sortDesc,
+              hideCompleted: hideComp,
+            )
+          : await _db.getAllEpisodes(
+              limit: pageSize,
+              offset: offset,
+              filter: state.filter,
+              sortDescending: sortDesc,
+              hideCompleted: hideComp,
+            );
 
       if (!mounted) return;
 
@@ -533,12 +628,17 @@ class EpisodesNotifier extends StateNotifier<EpisodesState> {
 
 final episodesNotifierProvider = StateNotifierProvider.autoDispose
     .family<EpisodesNotifier, EpisodesState, int?>((ref, podcastId) {
+  final sortOrder = ref.watch(appSettingsProvider.select((s) => s.defaultEpisodeSort));
+  final hideCompleted = ref.watch(appSettingsProvider.select((s) => s.hideCompletedEpisodes));
+
   return EpisodesNotifier(
     ref.watch(databaseProvider),
     ref.watch(syncStatusNotifierProvider.notifier),
     ref.watch(audioHandlerProvider),
     podcastId,
     downloadService: ref.watch(episodeDownloadServiceProvider),
+    defaultEpisodeSort: sortOrder,
+    hideCompletedEpisodes: hideCompleted,
   );
 });
 

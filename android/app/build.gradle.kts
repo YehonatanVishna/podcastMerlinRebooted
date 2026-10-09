@@ -36,6 +36,12 @@ android {
             )
         }
     }
+
+    packaging {
+        jniLibs {
+            pickFirsts.add("**/libsqlite3.so")
+        }
+    }
 }
 
 kotlin {

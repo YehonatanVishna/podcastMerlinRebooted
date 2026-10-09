@@ -1119,7 +1119,7 @@ class _EpisodeListViewState extends ConsumerState<EpisodeListView> {
   }
 }
 
-class _EpisodeTile extends StatelessWidget {
+class _EpisodeTile extends ConsumerWidget {
   final Episode episode;
   final dynamic audioHandler;
   final bool isSelectionMode;
@@ -1231,7 +1231,7 @@ class _EpisodeTile extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     Stream<PlaybackState>? playbackStream;
     try {
       if (audioHandler is BaseAudioHandler) {
@@ -1301,12 +1301,13 @@ class _EpisodeTile extends StatelessWidget {
         }
 
         final showProgress = displayPosition > 0 && !isFinished;
-        final isCompact = MediaQuery.sizeOf(context).width < 600;
+        final isUserCompact = ref.watch(appSettingsProvider.select((s) => s.compactEpisodeRows));
+        final isCompact = isUserCompact || (MediaQuery.sizeOf(context).width < 600);
 
         final tile = ListTile(
           selected: isSelected,
           selectedTileColor: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.25),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: isUserCompact ? 3 : 8),
           leading: isSelectionMode
               ? Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1319,8 +1320,8 @@ class _EpisodeTile extends StatelessWidget {
                       children: [
                         AppCachedImage(
                           imageUrl: episode.imageUrl,
-                          width: 44,
-                          height: 44,
+                          width: isUserCompact ? 36 : 44,
+                          height: isUserCompact ? 36 : 44,
                           borderRadius: BorderRadius.circular(6),
                         ),
                         if (isFinished)
@@ -1348,8 +1349,8 @@ class _EpisodeTile extends StatelessWidget {
                   children: [
                     AppCachedImage(
                       imageUrl: episode.imageUrl,
-                      width: 56,
-                      height: 56,
+                      width: isUserCompact ? 40 : 56,
+                      height: isUserCompact ? 40 : 56,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     if (isFinished)
@@ -1373,7 +1374,7 @@ class _EpisodeTile extends StatelessWidget {
                 ),
           title: Text(
             episode.title,
-            maxLines: 2,
+            maxLines: isUserCompact ? 1 : 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
@@ -1448,8 +1449,6 @@ class _EpisodeTile extends StatelessWidget {
               ? null
               : LayoutBuilder(
                   builder: (context, constraints) {
-                    final isCompact = MediaQuery.sizeOf(context).width < 600;
-
                     final moreMenu = PopupMenuButton<String>(
                       icon: const Icon(Icons.more_vert),
                       tooltip: 'More options',

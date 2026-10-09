@@ -751,6 +751,163 @@ void main() {
       final epList = await db.getDownloadedEpisodes();
       expect(epList.first.downloadedBytes, 20);
     });
+
+    test('autoDownloadSubscriptions downloads the latest N unplayed episodes across subscriptions', () async {
+      final podId = await db.insertOrUpdatePodcast(
+        Podcast(
+          rssUrl: 'https://example.com/autodl_sub.xml',
+          title: 'AutoDL Show',
+          description: '',
+          imageUrl: '',
+          link: '',
+          lastUpdated: DateTime.now(),
+        ),
+      );
+
+      final now = DateTime.now();
+      final ep1 = Episode(
+        podcastId: podId,
+        guid: 'autodl_1',
+        title: 'AutoDL Ep 1 (oldest)',
+        mediaUrl: '$serverUrl/sample.mp3?ep=1',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_sub.xml',
+        publishedAt: now.subtract(const Duration(days: 3)),
+      );
+      final ep2 = Episode(
+        podcastId: podId,
+        guid: 'autodl_2',
+        title: 'AutoDL Ep 2',
+        mediaUrl: '$serverUrl/sample.mp3?ep=2',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_sub.xml',
+        publishedAt: now.subtract(const Duration(days: 2)),
+      );
+      final ep3 = Episode(
+        podcastId: podId,
+        guid: 'autodl_3',
+        title: 'AutoDL Ep 3 (newest)',
+        mediaUrl: '$serverUrl/sample.mp3?ep=3',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_sub.xml',
+        publishedAt: now.subtract(const Duration(days: 1)),
+      );
+
+      await db.insertEpisodes([ep1, ep2, ep3]);
+
+      // Request auto-downloading the last 2 episodes of every subscription
+      final queuedCount = await service.autoDownloadSubscriptions(maxEpisodesPerSubscription: 2);
+      expect(queuedCount, 2);
+
+      final dbEp1 = await db.getEpisodeByGuid('autodl_1');
+      final dbEp2 = await db.getEpisodeByGuid('autodl_2');
+      final dbEp3 = await db.getEpisodeByGuid('autodl_3');
+      expect(dbEp1, isNotNull);
+      expect(dbEp2, isNotNull);
+      expect(dbEp3, isNotNull);
+
+      // Verify ep3 (newest) and ep2 (second newest) were queued, while ep1 (oldest) was omitted
+      expect(service.isEpisodeActive(dbEp3!.id!) || service.isEpisodeQueued(dbEp3.id!), isTrue);
+      expect(service.isEpisodeActive(dbEp2!.id!) || service.isEpisodeQueued(dbEp2.id!), isTrue);
+      expect(service.isEpisodeActive(dbEp1!.id!) || service.isEpisodeQueued(dbEp1.id!), isFalse);
+
+      // Re-invoking should queue 0 because they are already active or queued
+      final secondRun = await service.autoDownloadSubscriptions(maxEpisodesPerSubscription: 2);
+      expect(secondRun, 0);
+
+      // Test autoDownloadForPodcast for specific podcast
+      final pod2Id = await db.insertOrUpdatePodcast(
+        Podcast(
+          rssUrl: 'https://example.com/autodl_single.xml',
+          title: 'AutoDL Single Show',
+          description: '',
+          imageUrl: '',
+          link: '',
+          lastUpdated: DateTime.now(),
+        ),
+      );
+      final singleEp = Episode(
+        podcastId: pod2Id,
+        guid: 'autodl_single_1',
+        title: 'AutoDL Single Ep 1',
+        mediaUrl: '$serverUrl/sample.mp3?ep=single1',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_single.xml',
+        publishedAt: now,
+      );
+      await db.insertEpisodes([singleEp]);
+
+      final singleQueued = await service.autoDownloadForPodcast(pod2Id, maxEpisodes: 1);
+      expect(singleQueued, 1);
+    });
+
+    test('autoDownloadSubscriptions skips already downloaded and completed/played episodes', () async {
+      final podId = await db.insertOrUpdatePodcast(
+        Podcast(
+          rssUrl: 'https://example.com/autodl_skip.xml',
+          title: 'AutoDL Skip Show',
+          description: '',
+          imageUrl: '',
+          link: '',
+          lastUpdated: DateTime.now(),
+        ),
+      );
+
+      final now = DateTime.now();
+      // ep1: newest, but already downloaded
+      final ep1 = Episode(
+        podcastId: podId,
+        guid: 'autodl_skip_1',
+        title: 'Already Downloaded Ep',
+        mediaUrl: '$serverUrl/sample.mp3?skip=1',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_skip.xml',
+        publishedAt: now.subtract(const Duration(hours: 1)),
+        downloadStatus: DownloadStatus.downloaded,
+        downloadPath: '/fake/path.mp3',
+      );
+      // ep2: next newest, but already played
+      final ep2 = Episode(
+        podcastId: podId,
+        guid: 'autodl_skip_2',
+        title: 'Already Played Ep',
+        mediaUrl: '$serverUrl/sample.mp3?skip=2',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_skip.xml',
+        publishedAt: now.subtract(const Duration(hours: 2)),
+        isPlayed: true,
+      );
+      // ep3: unplayed and not downloaded
+      final ep3 = Episode(
+        podcastId: podId,
+        guid: 'autodl_skip_3',
+        title: 'Unplayed Candidate Ep',
+        mediaUrl: '$serverUrl/sample.mp3?skip=3',
+        description: '',
+        imageUrl: '',
+        podcastRss: 'https://example.com/autodl_skip.xml',
+        publishedAt: now.subtract(const Duration(hours: 3)),
+      );
+
+      await db.insertEpisodes([ep1, ep2, ep3]);
+
+      // When requesting max 2 unplayed episodes, ep1 (downloaded) and ep2 (played) must be skipped,
+      // and only ep3 should be queued
+      final queuedCount = await service.autoDownloadSubscriptions(
+        maxEpisodesPerSubscription: 2,
+        onlyUnplayed: true,
+      );
+      expect(queuedCount, 1);
+
+      final dbEp3 = await db.getEpisodeByGuid('autodl_skip_3');
+      expect(service.isEpisodeActive(dbEp3!.id!) || service.isEpisodeQueued(dbEp3.id!), isTrue);
+    });
   });
 
   group('AudioPlayerService Offline Playback Resolution', () {
@@ -1323,6 +1480,59 @@ void main() {
       await service.resumeAll();
       expect(service.isEpisodeActive(savedEp.id!) || service.isEpisodeQueued(savedEp.id!), isTrue);
       await service.pauseAll();
+    });
+
+    test('cancelAllActive cancels all active and queued downloads for 100 episodes', () async {
+      final podId = await db.insertOrUpdatePodcast(
+        Podcast(
+          rssUrl: '$serverUrl/bulk_feed.xml',
+          title: '100 Episodes Pod',
+          description: '',
+          imageUrl: '',
+          link: '',
+          lastUpdated: DateTime.now(),
+        ),
+      );
+
+      final episodes = List.generate(
+        100,
+        (i) => Episode(
+          podcastId: podId,
+          guid: 'ep-bulk-cancel-$i',
+          title: 'Bulk Cancel $i',
+          mediaUrl: '$serverUrl/pause_test.mp3?ep=$i',
+          description: '',
+          imageUrl: '',
+          podcastRss: '',
+        ),
+      );
+
+      await db.insertEpisodes(episodes);
+      final savedEps = await db.getEpisodesForPodcast(podId);
+      expect(savedEps.length, 100);
+
+      for (final ep in savedEps) {
+        await service.startDownload(ep);
+      }
+
+      expect(service.activeAndQueuedCount, 100);
+      expect(service.queuedEpisodes.length, 98);
+
+      await service.cancelAllActive();
+
+      expect(service.activeAndQueuedCount, 0);
+      expect(service.queuedEpisodes, isEmpty);
+      expect(
+        service.currentTasks.values
+            .where((t) => t.status != DownloadStatus.none && t.status != DownloadStatus.downloaded),
+        isEmpty,
+      );
+
+      final dbEps = await db.getEpisodesForPodcast(podId);
+      for (final ep in dbEps) {
+        expect(ep.downloadStatus, DownloadStatus.none);
+        expect(ep.downloadPath, isNull);
+      }
     });
   });
 

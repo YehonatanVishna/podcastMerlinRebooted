@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/providers/app_providers.dart';
-import '../../../core/theme/theme_provider.dart';
+import '../../../core/services/image_cache_service.dart';
 import '../../sync/opml_ui_helper.dart';
 import '../../sync/secure_storage_service.dart';
+import '../widgets/dopamine_switcher_sheet.dart';
 import '../widgets/sync_error_banner.dart';
 import '../../../main.dart';
 
@@ -19,13 +20,21 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   final _serverController = TextEditingController();
   final _userController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _podcastIndexKeyController = TextEditingController();
+  final _podcastIndexSecretController = TextEditingController();
+  final _deviceIdController = TextEditingController();
 
   bool _isLoading = true;
   bool _isTesting = false;
+  bool _obscurePodcastIndexSecret = true;
   String? _statusMessage;
   bool _isSuccessStatus = false;
-  int _rewindSeconds = 10;
-  int _fastForwardSeconds = 30;
+  int? _imageCacheBytes;
+
+  bool _isClearingCache = false;
+  bool _isAutoDownloading = false;
+  bool _isClearingDownloads = false;
+  double? _dragPlaybackSpeed;
 
   @override
   void initState() {
@@ -34,20 +43,18 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   }
 
   Future<void> _loadSavedCredentials() async {
+    await ref.read(appSettingsProvider.notifier).ensureLoaded();
     final storage = ref.read(secureStorageProvider);
+    final settings = ref.read(appSettingsProvider);
+
     _serverController.text = await storage.read(SecureStorageService.keyServerUrl) ?? '';
     _userController.text = await storage.read(SecureStorageService.keyUsername) ?? '';
     _passwordController.text = await storage.read(SecureStorageService.keyPassword) ?? '';
+    _podcastIndexKeyController.text = settings.podcastIndexApiKey;
+    _podcastIndexSecretController.text = settings.podcastIndexApiSecret;
+    _deviceIdController.text = settings.deviceId;
 
-    final rew = await storage.read(SecureStorageService.keyRewindDuration);
-    final ff = await storage.read(SecureStorageService.keyFastForwardDuration);
-    if (rew != null && int.tryParse(rew) != null) {
-      _rewindSeconds = int.parse(rew);
-    }
-    if (ff != null && int.tryParse(ff) != null) {
-      _fastForwardSeconds = int.parse(ff);
-    }
-
+    _refreshImageCacheSize();
     ref.invalidate(downloadStorageUsageBytesProvider);
     ref.invalidate(downloadedEpisodesCountProvider);
 
@@ -57,15 +64,31 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     });
   }
 
+  Future<void> _refreshImageCacheSize() async {
+    try {
+      final bytes = await ImageCacheService.getCacheSizeBytes();
+      if (mounted) {
+        setState(() => _imageCacheBytes = bytes);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _imageCacheBytes = -1);
+      }
+    }
+  }
+
   @override
   void dispose() {
     _serverController.dispose();
     _userController.dispose();
     _passwordController.dispose();
+    _podcastIndexKeyController.dispose();
+    _podcastIndexSecretController.dispose();
+    _deviceIdController.dispose();
     super.dispose();
   }
 
-  Future<void> _saveCredentials() async {
+  Future<void> _saveNextcloudCredentials() async {
     final storage = ref.read(secureStorageProvider);
     final oldServer = await storage.read(SecureStorageService.keyServerUrl) ?? '';
     final oldUser = await storage.read(SecureStorageService.keyUsername) ?? '';
@@ -73,7 +96,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     final newUser = _userController.text.trim();
 
     if (oldServer != newServer || oldUser != newUser) {
-      // Credentials or server changed, reset sync timestamps so next sync does a clean full fetch
       await storage.delete(SecureStorageService.keyLastSubscriptionTimestamp);
       await storage.delete(SecureStorageService.keyLastActionTimestamp);
     }
@@ -82,10 +104,33 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     await storage.write(SecureStorageService.keyUsername, newUser);
     await storage.write(SecureStorageService.keyPassword, _passwordController.text.trim());
 
-    await storage.write(SecureStorageService.keyRewindDuration, _rewindSeconds.toString());
-    await storage.write(SecureStorageService.keyFastForwardDuration, _fastForwardSeconds.toString());
-    ref.read(audioHandlerProvider).setSeekDurations(rewind: _rewindSeconds, fastForward: _fastForwardSeconds);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nextcloud credentials saved')),
+      );
+    }
+  }
 
+  Future<void> _saveDiscoverySettings() async {
+    final settingsNotifier = ref.read(appSettingsProvider.notifier);
+    settingsNotifier.setPodcastIndexCredentials(
+      _podcastIndexKeyController.text.trim(),
+      _podcastIndexSecretController.text.trim(),
+    );
+    if (_deviceIdController.text.trim().isNotEmpty) {
+      settingsNotifier.setDeviceId(_deviceIdController.text.trim());
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('API Keys & Device ID saved')),
+      );
+    }
+  }
+
+  Future<void> _saveCredentials() async {
+    await _saveNextcloudCredentials();
+    await _saveDiscoverySettings();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Settings saved successfully')),
@@ -131,20 +176,29 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final syncStatus = ref.watch(syncStatusNotifierProvider);
+    final settings = ref.watch(appSettingsProvider);
+    final settingsNotifier = ref.read(appSettingsProvider.notifier);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.check),
+            tooltip: 'Save Settings',
+            onPressed: _saveCredentials,
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 600),
+            constraints: const BoxConstraints(maxWidth: 700),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // Header Logo
                 Center(
                   child: Column(
                     children: [
@@ -165,7 +219,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Nextcloud gPodder Client • v2.0.0',
+                        'Configurable Podcast Client • v2.0.0',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               color: Theme.of(context)
                                   .textTheme
@@ -178,421 +232,1138 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                if (syncStatus.error != null && !syncStatus.isSyncing) ...[
-                  SyncErrorBanner(
-                    title: 'Sync Failed',
-                    summary: 'Some sync tasks failed',
-                    errorMessage: syncStatus.error!,
-                    onDismiss: () => ref.read(syncStatusNotifierProvider.notifier).clearError(),
-                    onRetry: () => ref.read(podcastsNotifierProvider.notifier).refreshAll(),
+
+                Consumer(
+                  builder: (context, ref, _) {
+                    final syncStatus = ref.watch(syncStatusNotifierProvider);
+                    if (syncStatus.error == null || syncStatus.isSyncing) return const SizedBox.shrink();
+                    return Column(
+                      children: [
+                        SyncErrorBanner(
+                          title: 'Sync Failed',
+                          summary: 'Some sync tasks failed',
+                          errorMessage: syncStatus.error!,
+                          onDismiss: () => ref.read(syncStatusNotifierProvider.notifier).clearError(),
+                          onRetry: () => ref.read(podcastsNotifierProvider.notifier).refreshAll(),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                    );
+                  },
+                ),
+
+                // 1. APPEARANCE & INTERFACE
+                _buildSectionHeader('Appearance & Interface', Icons.palette_outlined),
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Theme.of(context).dividerColor),
                   ),
-                  const SizedBox(height: 16),
-                ],
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Synchronization & Storage',
-                            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _serverController.text.trim().isEmpty
-                                ? 'Standalone / Local Only Mode (No server required)'
-                                : 'Nextcloud gPodder Sync Mode',
-                            style: TextStyle(
-                              color: _serverController.text.trim().isEmpty
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Colors.green,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: _serverController.text.trim().isEmpty
-                            ? Theme.of(context).colorScheme.primaryContainer
-                            : Colors.green.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _serverController.text.trim().isEmpty ? Icons.phone_android : Icons.cloud_outlined,
-                            size: 14,
-                            color: _serverController.text.trim().isEmpty
-                                ? Theme.of(context).colorScheme.onPrimaryContainer
-                                : Colors.green[800],
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _serverController.text.trim().isEmpty ? 'Local Mode' : 'gPodder Mode',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: _serverController.text.trim().isEmpty
-                                  ? Theme.of(context).colorScheme.onPrimaryContainer
-                                  : Colors.green[800],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _serverController.text.trim().isEmpty
-                      ? 'You are running in standalone local mode. Subscriptions, downloads, and playback progress are stored securely on your device.'
-                      : 'Synchronize podcast subscriptions and playback positions with your Nextcloud gPodder server across all your devices.',
-                  style: const TextStyle(color: Colors.grey),
-                ),
-                const SizedBox(height: 20),
-                TextField(
-                  controller: _serverController,
-                  decoration: const InputDecoration(
-                    labelText: 'Nextcloud Server URL (Optional for Local Mode)',
-                    hintText: 'https://nextcloud.example.com',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.cloud),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _userController,
-                  decoration: const InputDecoration(
-                    labelText: 'Username',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.person),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'App Password or Password',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.lock),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 24),
-                if (_statusMessage != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: _isSuccessStatus
-                          ? Colors.green.withValues(alpha: 0.15)
-                          : Colors.red.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: _isSuccessStatus ? Colors.green : Colors.red,
-                        width: 1,
-                      ),
-                    ),
-                    child: Row(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
-                          _isSuccessStatus ? Icons.check_circle_outline : Icons.error_outline,
-                          color: _isSuccessStatus ? Colors.green[800] : Colors.red[800],
-                          size: 20,
+                        Text('App Theme', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: AppThemeMode.values.map((mode) {
+                            final isSelected = settings.themeMode == mode;
+                            return ChoiceChip(
+                              label: Text(mode.label),
+                              selected: isSelected,
+                              onSelected: (_) => settingsNotifier.setThemeMode(mode),
+                            );
+                          }).toList(),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _statusMessage!,
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        const SizedBox(height: 8),
+                        Text('Accent Color', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: AppAccentColor.values.map((accent) {
+                            final isSelected = !settings.useDynamicColor && settings.accentColor == accent;
+                            return Tooltip(
+                              message: accent.label,
+                              child: SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: InkResponse(
+                                  onTap: () => settingsNotifier.setAccentColor(accent),
+                                  radius: 24,
+                                  child: Center(
+                                    child: AnimatedOpacity(
+                                      duration: const Duration(milliseconds: 200),
+                                      opacity: settings.useDynamicColor ? 0.65 : 1.0,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(3),
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: isSelected ? Theme.of(context).colorScheme.primary : Colors.transparent,
+                                            width: 2,
+                                          ),
+                                        ),
+                                        child: CircleAvatar(
+                                          radius: 14,
+                                          backgroundColor: accent.color,
+                                          child: isSelected ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                        if (settings.useDynamicColor) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Dynamic system color is currently enabled. Choosing a custom accent color will turn off dynamic theming.',
                             style: TextStyle(
-                              color: _isSuccessStatus ? Colors.green[900] : Colors.red[900],
-                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              fontStyle: FontStyle.italic,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
                           ),
+                        ],
+                        const SizedBox(height: 12),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: const Icon(Icons.color_lens_outlined),
+                          title: const Text('Use system theme color'),
+                          subtitle: const Text(
+                            'Adapts brand and accent colors to your OS system theme or wallpaper (Android 12+, Windows, macOS, Linux).',
+                          ),
+                          value: settings.useDynamicColor,
+                          onChanged: (val) {
+                            settingsNotifier.setUseDynamicColor(val);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        DropdownButtonFormField<DefaultLandingTab>(
+                          isExpanded: true,
+                          initialValue: DefaultLandingTab.values.contains(settings.defaultLandingTab)
+                              ? settings.defaultLandingTab
+                              : DefaultLandingTab.catalog,
+                          decoration: const InputDecoration(
+                            labelText: 'Default Startup Tab',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.tab_outlined),
+                          ),
+                          items: DefaultLandingTab.values.map((tab) {
+                            return DropdownMenuItem(value: tab, child: Text(tab.label));
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) settingsNotifier.setDefaultLandingTab(val);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Default Episode Sort Order',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<EpisodeSortOrder>(
+                            segments: const [
+                              ButtonSegment(
+                                value: EpisodeSortOrder.newestFirst,
+                                label: Text('Newest First'),
+                                icon: Icon(Icons.arrow_downward),
+                              ),
+                              ButtonSegment(
+                                value: EpisodeSortOrder.oldestFirst,
+                                label: Text('Oldest First'),
+                                icon: Icon(Icons.arrow_upward),
+                              ),
+                            ],
+                            selected: {settings.defaultEpisodeSort},
+                            onSelectionChanged: (selected) {
+                              settingsNotifier.setDefaultEpisodeSort(selected.first);
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Compact Episode Rows'),
+                          subtitle: const Text('Fit more episodes on screen with dense row layouts'),
+                          value: settings.compactEpisodeRows,
+                          onChanged: (val) => settingsNotifier.setCompactEpisodeRows(val),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Hide Completed Episodes'),
+                          subtitle: const Text('Automatically filter out finished episodes across lists'),
+                          value: settings.hideCompletedEpisodes,
+                          onChanged: (val) => settingsNotifier.setHideCompletedEpisodes(val),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 16),
-                ],
-                Consumer(
-                  builder: (context, ref, child) {
-                    final syncState = ref.watch(syncStatusNotifierProvider);
-                    final isSyncing = syncState.isSyncing;
-                    final isConfigured = _serverController.text.trim().isNotEmpty &&
-                        _userController.text.trim().isNotEmpty;
+                ),
+                const SizedBox(height: 24),
 
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                // 2. PLAYBACK & CONTROLS
+                _buildSectionHeader('Playback & Controls', Icons.play_circle_outline),
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (isSyncing) ...[
-                          Row(
-                            children: [
-                              const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                        Text(
+                          'Default Playback Speed: ${(_dragPlaybackSpeed ?? settings.defaultPlaybackSpeed).toStringAsFixed(1)}x',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [1.0, 1.2, 1.5, 2.0].map((preset) {
+                            final isSelected = ((_dragPlaybackSpeed ?? settings.defaultPlaybackSpeed) - preset).abs() < 0.05;
+                            return ChoiceChip(
+                              label: Text('${preset.toStringAsFixed(1)}x'),
+                              selected: isSelected,
+                              onSelected: (_) {
+                                setState(() => _dragPlaybackSpeed = null);
+                                settingsNotifier.setDefaultPlaybackSpeed(preset);
+                              },
+                            );
+                          }).toList(),
+                        ),
+                        Slider(
+                          value: _dragPlaybackSpeed ?? settings.defaultPlaybackSpeed,
+                          min: 0.5,
+                          max: 3.0,
+                          divisions: 25,
+                          label: '${(_dragPlaybackSpeed ?? settings.defaultPlaybackSpeed).toStringAsFixed(1)}x',
+                          onChanged: (val) {
+                            setState(() {
+                              _dragPlaybackSpeed = double.parse(val.toStringAsFixed(1));
+                            });
+                          },
+                          onChangeEnd: (val) {
+                            final speed = double.parse(val.toStringAsFixed(1));
+                            setState(() => _dragPlaybackSpeed = null);
+                            settingsNotifier.setDefaultPlaybackSpeed(speed);
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final isNarrow = constraints.maxWidth < 500;
+                            final rewindDropdown = DropdownButtonFormField<int>(
+                              isExpanded: true,
+                              initialValue: const [5, 10, 15, 30, 45, 60].contains(settings.rewindDurationSeconds)
+                                  ? settings.rewindDurationSeconds
+                                  : 10,
+                              decoration: const InputDecoration(
+                                labelText: 'Rewind Interval',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.replay),
                               ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  syncState.currentTask ?? (isConfigured ? 'Syncing with gPodder...' : 'Refreshing local feeds...'),
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
+                              items: const [5, 10, 15, 30, 45, 60]
+                                  .map((s) => DropdownMenuItem(value: s, child: Text('$s seconds')))
+                                  .toList(),
+                              onChanged: (val) {
+                                if (val != null) settingsNotifier.setSeekDurations(rewind: val);
+                              },
+                            );
+
+                            final fastForwardDropdown = DropdownButtonFormField<int>(
+                              isExpanded: true,
+                              initialValue: const [5, 10, 15, 30, 45, 60].contains(settings.fastForwardDurationSeconds)
+                                  ? settings.fastForwardDurationSeconds
+                                  : 30,
+                              decoration: const InputDecoration(
+                                labelText: 'Fast Forward Interval',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.forward),
+                              ),
+                              items: const [5, 10, 15, 30, 45, 60]
+                                  .map((s) => DropdownMenuItem(value: s, child: Text('$s seconds')))
+                                  .toList(),
+                              onChanged: (val) {
+                                if (val != null) settingsNotifier.setSeekDurations(fastForward: val);
+                              },
+                            );
+
+                            if (isNarrow) {
+                              return Column(
+                                children: [
+                                  rewindDropdown,
+                                  const SizedBox(height: 12),
+                                  fastForwardDropdown,
+                                ],
+                              );
+                            }
+                            return Row(
+                              children: [
+                                Expanded(child: rewindDropdown),
+                                const SizedBox(width: 12),
+                                Expanded(child: fastForwardDropdown),
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        DropdownButtonFormField<int>(
+                          isExpanded: true,
+                          initialValue: const [0, 30, 60, 90, 120].contains(settings.markAsPlayedThresholdSeconds)
+                              ? settings.markAsPlayedThresholdSeconds
+                              : 60,
+                          decoration: const InputDecoration(
+                            labelText: 'Mark-as-Played Outro Buffer',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.check_circle_outline),
+                            helperText: 'Episode marks as finished when remaining time drops below this buffer',
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 0, child: Text('At very end (0s)')),
+                            DropdownMenuItem(value: 30, child: Text('30 seconds before end')),
+                            DropdownMenuItem(value: 60, child: Text('60 seconds before end (Default)')),
+                            DropdownMenuItem(value: 90, child: Text('90 seconds before end')),
+                            DropdownMenuItem(value: 120, child: Text('2 minutes before end')),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) settingsNotifier.setMarkAsPlayedThresholdSeconds(val);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Audio Focus Loss Action',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Behavior when another app or notification plays sound',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                              ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<AutoFocusLossAction>(
+                            segments: const [
+                              ButtonSegment(
+                                value: AutoFocusLossAction.pauseAndResume,
+                                label: Text('Pause & Resume'),
+                                icon: Icon(Icons.pause_circle_outline),
+                              ),
+                              ButtonSegment(
+                                value: AutoFocusLossAction.duck,
+                                label: Text('Duck Volume'),
+                                icon: Icon(Icons.volume_down),
                               ),
                             ],
+                            selected: {settings.audioFocusLossAction},
+                            onSelectionChanged: (selected) {
+                              settingsNotifier.setAutoFocusLossAction(selected.first);
+                            },
                           ),
-                          const SizedBox(height: 12),
-                        ],
-                        FilledButton.icon(
-                          icon: isSyncing
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                )
-                              : const Icon(Icons.sync),
-                          label: Text(
-                            isSyncing
-                                ? 'Processing...'
-                                : (isConfigured ? 'Save & Sync with gPodder' : 'Refresh Local Feeds (Local Mode)'),
-                          ),
-                          onPressed: isSyncing
-                              ? null
-                              : () async {
-                                  await _saveCredentials();
-                                  ref.read(podcastsNotifierProvider.notifier).refreshAll();
-                                },
                         ),
-                        if (isConfigured) ...[
+                        const SizedBox(height: 16),
+                        DropdownButtonFormField<int>(
+                          isExpanded: true,
+                          initialValue: const [0, 10, 15, 30].contains(settings.sleepTimerFadeOutSeconds)
+                              ? settings.sleepTimerFadeOutSeconds
+                              : 15,
+                          decoration: const InputDecoration(
+                            labelText: 'Sleep Timer Fade-Out',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.bedtime_outlined),
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 0, child: Text('Disabled (Instant Pause)')),
+                            DropdownMenuItem(value: 10, child: Text('10 seconds fade')),
+                            DropdownMenuItem(value: 15, child: Text('15 seconds fade (Default)')),
+                            DropdownMenuItem(value: 30, child: Text('30 seconds fade')),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) settingsNotifier.setSleepTimerFadeOutSeconds(val);
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Continuous Playback (Auto-play Next)'),
+                          subtitle: const Text('Automatically start next queued episode when current one ends'),
+                          value: settings.autoAdvanceQueue,
+                          onChanged: (val) => settingsNotifier.setAutoAdvanceQueue(val),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Skip Silence'),
+                          subtitle: const Text('Trim conversational pauses dynamically without pitch change'),
+                          value: settings.skipSilence,
+                          onChanged: (val) => settingsNotifier.setSkipSilence(val),
+                        ),
+                        const Divider(height: 24),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: Icon(Icons.bolt, color: Theme.of(context).colorScheme.primary),
+                          title: const Text('Dopamine Mode'),
+                          subtitle: const Text('Plays continuous hypnotic visuals or your own custom videos in the player to maintain focus'),
+                          value: settings.dopamineModeEnabled,
+                          onChanged: (val) => settingsNotifier.setDopamineModeEnabled(val),
+                        ),
+                        if (settings.dopamineModeEnabled) ...[
                           const SizedBox(height: 8),
-                          TextButton.icon(
-                            icon: const Icon(Icons.refresh),
-                            label: const Text('Force Full Re-sync (Retrieve all played positions)'),
-                            onPressed: isSyncing
+                          DropdownButtonFormField<DopamineVisualType>(
+                            isExpanded: true,
+                            initialValue: settings.dopamineVisualType,
+                            decoration: const InputDecoration(
+                              labelText: 'Dopamine Visual Type',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.auto_awesome),
+                            ),
+                            items: DopamineVisualType.values
+                                .map((type) => DropdownMenuItem(
+                                      value: type,
+                                      child: Text(type.label),
+                                    ))
+                                .toList(),
+                            onChanged: (val) {
+                              if (val != null) settingsNotifier.setDopamineVisualType(val);
+                            },
+                          ),
+                          if (settings.dopamineVisualType == DopamineVisualType.customVideo) ...[
+                            const SizedBox(height: 12),
+                            if (settings.dopamineCustomVideos.isNotEmpty) ...[
+                              DropdownButtonFormField<String>(
+                                key: ValueKey(settings.selectedCustomVideo?.id),
+                                isExpanded: true,
+                                initialValue: settings.dopamineCustomVideos
+                                        .any((v) => v.id == settings.selectedCustomVideo?.id)
+                                    ? settings.selectedCustomVideo?.id
+                                    : null,
+                                decoration: const InputDecoration(
+                                  labelText: 'Active Custom Video',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.movie_outlined),
+                                ),
+                                items: settings.dopamineCustomVideos
+                                    .map((vid) => DropdownMenuItem(
+                                          value: vid.id,
+                                          child: Text(vid.name, overflow: TextOverflow.ellipsis),
+                                        ))
+                                    .toList(),
+                                onChanged: (val) {
+                                  if (val != null) settingsNotifier.selectCustomVideo(val);
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                            OutlinedButton.icon(
+                              icon: const Icon(Icons.video_library_outlined),
+                              label: Text(settings.dopamineCustomVideos.isEmpty
+                                  ? 'Upload Your First Video'
+                                  : 'Manage Video Library (${settings.dopamineCustomVideos.length})'),
+                              onPressed: () => DopamineSwitcherSheet.show(context),
+                            ),
+                          ],
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // 3. DOWNLOADS & STORAGE
+                _buildSectionHeader('Downloads & Storage', Icons.download_for_offline_outlined),
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildDownloadsStorageCard(context),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        const SizedBox(height: 8),
+                        // Image cache row
+                        Row(
+                          children: [
+                            const Icon(Icons.image_outlined, size: 28),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Artwork Image Cache',
+                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                                  ),
+                                  Text(
+                                    _imageCacheBytes == null
+                                        ? 'Calculating...'
+                                        : (_imageCacheBytes! < 0
+                                            ? 'Error reading cache'
+                                            : '${_formatBytes(_imageCacheBytes!)} cached artwork'),
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: _imageCacheBytes != null && _imageCacheBytes! < 0 ? Colors.red : Colors.grey,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            OutlinedButton.icon(
+                              icon: _isClearingCache
+                                  ? const SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.delete_outline, size: 16),
+                              label: const Text('Clear'),
+                              onPressed: _isClearingCache
+                                  ? null
+                                  : () async {
+                                      setState(() => _isClearingCache = true);
+                                      try {
+                                        await ImageCacheService.clearCache();
+                                        await _refreshImageCacheSize();
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(content: Text('Image cache cleared')),
+                                          );
+                                        }
+                                      } finally {
+                                        if (mounted) setState(() => _isClearingCache = false);
+                                      }
+                                    },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        DropdownButtonFormField<int>(
+                          isExpanded: true,
+                          initialValue: const [1, 2, 3, 4, 5].contains(settings.maxConcurrentDownloads)
+                              ? settings.maxConcurrentDownloads
+                              : 2,
+                          decoration: const InputDecoration(
+                            labelText: 'Max Concurrent Downloads',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.speed),
+                          ),
+                          items: const [1, 2, 3, 4, 5]
+                              .map((c) => DropdownMenuItem(value: c, child: Text('$c simultaneous downloads')))
+                              .toList(),
+                          onChanged: (val) {
+                            if (val != null) settingsNotifier.setMaxConcurrentDownloads(val);
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Auto-Delete Episode After Play'),
+                          subtitle: const Text('Automatically delete downloaded episode when playback finishes'),
+                          value: settings.autoDeleteAfterPlay,
+                          onChanged: (val) => settingsNotifier.setAutoDeleteAfterPlay(val),
+                        ),
+                        if (settings.autoDeleteAfterPlay) ...[
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<AutoDeletePlayedPolicy>(
+                            isExpanded: true,
+                            initialValue: AutoDeletePlayedPolicy.values.contains(settings.autoDeletePlayed)
+                                ? settings.autoDeletePlayed
+                                : AutoDeletePlayedPolicy.immediately,
+                            decoration: const InputDecoration(
+                              labelText: 'Auto-Delete Cleanup Schedule',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.auto_delete_outlined),
+                            ),
+                            items: AutoDeletePlayedPolicy.values.map((pol) {
+                              return DropdownMenuItem(value: pol, child: Text(pol.label));
+                            }).toList(),
+                            onChanged: (val) {
+                              if (val != null) settingsNotifier.setAutoDeletePlayed(val);
+                            },
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        DropdownButtonFormField<int>(
+                          isExpanded: true,
+                          initialValue: const [0, 2, 5, 10, 20].contains(settings.maxStorageQuotaGb)
+                              ? settings.maxStorageQuotaGb
+                              : 10,
+                          decoration: const InputDecoration(
+                            labelText: 'Download Storage Quota',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.sd_storage_outlined),
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 0, child: Text('Unlimited')),
+                            DropdownMenuItem(value: 2, child: Text('2 GB')),
+                            DropdownMenuItem(value: 5, child: Text('5 GB')),
+                            DropdownMenuItem(value: 10, child: Text('10 GB (Default)')),
+                            DropdownMenuItem(value: 20, child: Text('20 GB')),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) settingsNotifier.setMaxStorageQuotaGb(val);
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Download on Wi-Fi Only'),
+                          subtitle: const Text('Prevent large audio file downloads when connected to mobile data'),
+                          value: settings.downloadWifiOnly,
+                          onChanged: (val) => settingsNotifier.setDownloadWifiOnly(val),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Auto-Download Last Episodes'),
+                          subtitle: const Text('Automatically download the last N episodes of every subscription'),
+                          value: settings.autoDownloadNewEpisodes,
+                          onChanged: (val) => settingsNotifier.setAutoDownloadNewEpisodes(val),
+                        ),
+                        if (settings.autoDownloadNewEpisodes) ...[
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<int>(
+                            isExpanded: true,
+                            initialValue: const [1, 2, 3, 5, 10].contains(settings.autoDownloadMaxPerShow)
+                                ? settings.autoDownloadMaxPerShow
+                                : 3,
+                            decoration: const InputDecoration(
+                              labelText: 'Episodes Per Subscription to Keep Downloaded',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.downloading_outlined),
+                            ),
+                            items: const [
+                              DropdownMenuItem(value: 1, child: Text('Latest 1 episode')),
+                              DropdownMenuItem(value: 2, child: Text('Latest 2 episodes')),
+                              DropdownMenuItem(value: 3, child: Text('Latest 3 episodes (Default)')),
+                              DropdownMenuItem(value: 5, child: Text('Latest 5 episodes')),
+                              DropdownMenuItem(value: 10, child: Text('Latest 10 episodes')),
+                            ],
+                            onChanged: (val) {
+                              if (val != null) settingsNotifier.setAutoDownloadMaxPerShow(val);
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          OutlinedButton.icon(
+                            onPressed: _isAutoDownloading
                                 ? null
                                 : () async {
-                                    await _saveCredentials();
-                                    ref.read(podcastsNotifierProvider.notifier).refreshAll(forceFullResync: true);
+                                    setState(() => _isAutoDownloading = true);
+                                    try {
+                                      final count = await ref.read(episodeDownloadServiceProvider).autoDownloadSubscriptions(
+                                        maxEpisodesPerSubscription: settings.autoDownloadMaxPerShow,
+                                      );
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              count > 0
+                                                  ? 'Queued $count episode${count == 1 ? '' : 's'} for download across subscriptions'
+                                                  : 'All subscription episodes are already up to date',
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                    } finally {
+                                      if (mounted) setState(() => _isAutoDownloading = false);
+                                    }
                                   },
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  icon: _isTesting
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
-                                        )
-                                      : const Icon(Icons.cloud_done),
-                                  label: const Text('Test Connection'),
-                                  onPressed: _isTesting ? null : _testConnection,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  icon: const Icon(Icons.cloud_off, color: Colors.red),
-                                  label: const Text('Use Local Only'),
-                                  onPressed: () async {
-                                    final storage = ref.read(secureStorageProvider);
-                                    await storage.delete(SecureStorageService.keyServerUrl);
-                                    await storage.delete(SecureStorageService.keyUsername);
-                                    await storage.delete(SecureStorageService.keyPassword);
-                                    await storage.delete(SecureStorageService.keyLastSubscriptionTimestamp);
-                                    await storage.delete(SecureStorageService.keyLastActionTimestamp);
-                                    setState(() {
-                                      _serverController.clear();
-                                      _userController.clear();
-                                      _passwordController.clear();
-                                      _statusMessage = 'Switched to standalone Local Mode.';
-                                      _isSuccessStatus = true;
-                                    });
-                                  },
-                                ),
-                              ),
-                            ],
+                            icon: _isAutoDownloading
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.sync),
+                            label: const Text('Download Latest Episodes Now'),
                           ),
                         ],
                       ],
-                    );
-                  },
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 24),
-                const Divider(),
-                const SizedBox(height: 16),
-                const Text(
-                  'Appearance',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Customize the theme mode and dynamic system colors across your devices.',
-                  style: TextStyle(color: Colors.grey),
-                ),
-                const SizedBox(height: 16),
-                _buildAppearanceCard(context),
-                const SizedBox(height: 24),
-                const Divider(),
-                const SizedBox(height: 16),
-                const Text(
-                  'Playback & Seek Controls',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Customize the rewind and fast-forward skip intervals used in the player dock.',
-                  style: TextStyle(color: Colors.grey),
-                ),
-                const SizedBox(height: 16),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final isNarrow = constraints.maxWidth < 500;
-                    final rewindDropdown = DropdownButtonFormField<int>(
-                      initialValue: _rewindSeconds,
-                      decoration: const InputDecoration(
-                        labelText: 'Rewind Interval',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.replay),
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 5, child: Text('5 seconds')),
-                        DropdownMenuItem(value: 10, child: Text('10 seconds')),
-                        DropdownMenuItem(value: 15, child: Text('15 seconds')),
-                        DropdownMenuItem(value: 30, child: Text('30 seconds')),
-                        DropdownMenuItem(value: 45, child: Text('45 seconds')),
-                        DropdownMenuItem(value: 60, child: Text('60 seconds')),
-                      ],
-                      onChanged: (val) {
-                        if (val != null) {
-                          setState(() => _rewindSeconds = val);
-                        }
-                      },
-                    );
 
-                    final fastForwardDropdown = DropdownButtonFormField<int>(
-                      initialValue: _fastForwardSeconds,
-                      decoration: const InputDecoration(
-                        labelText: 'Fast Forward Interval',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.forward),
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 5, child: Text('5 seconds')),
-                        DropdownMenuItem(value: 10, child: Text('10 seconds')),
-                        DropdownMenuItem(value: 15, child: Text('15 seconds')),
-                        DropdownMenuItem(value: 30, child: Text('30 seconds')),
-                        DropdownMenuItem(value: 45, child: Text('45 seconds')),
-                        DropdownMenuItem(value: 60, child: Text('60 seconds')),
-                      ],
-                      onChanged: (val) {
-                        if (val != null) {
-                          setState(() => _fastForwardSeconds = val);
-                        }
-                      },
-                    );
-
-                    if (isNarrow) {
-                      return Column(
-                        children: [
-                          rewindDropdown,
+                // 4. SYNCHRONIZATION (NEXTCLOUD / GPODDER)
+                _buildSectionHeader('Synchronization (Nextcloud / gPodder)', Icons.sync),
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        ListenableBuilder(
+                          listenable: _serverController,
+                          builder: (context, _) {
+                            final isLocal = _serverController.text.trim().isEmpty;
+                            return Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    isLocal
+                                        ? 'Standalone Local Mode (No server required)'
+                                        : 'Nextcloud gPodder Sync Mode',
+                                    style: TextStyle(
+                                      color: isLocal
+                                          ? Theme.of(context).colorScheme.primary
+                                          : Colors.green,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _serverController,
+                          decoration: const InputDecoration(
+                            labelText: 'Nextcloud Server URL (Optional for Local Mode)',
+                            hintText: 'https://nextcloud.example.com',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.cloud),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _userController,
+                          decoration: const InputDecoration(
+                            labelText: 'Username',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.person),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _passwordController,
+                          obscureText: true,
+                          decoration: const InputDecoration(
+                            labelText: 'App Password or Password',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.lock),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        if (_statusMessage != null) ...[
+                          Builder(
+                            builder: (context) {
+                              final isDark = Theme.of(context).brightness == Brightness.dark;
+                              return Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: _isSuccessStatus
+                                      ? (isDark ? Colors.green.withValues(alpha: 0.15) : Colors.green[50])
+                                      : (isDark ? Colors.red.withValues(alpha: 0.15) : Colors.red[50]),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: _isSuccessStatus
+                                        ? (isDark ? Colors.green[300]! : Colors.green)
+                                        : (isDark ? Colors.red[300]! : Colors.red),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(
+                                      _isSuccessStatus ? Icons.check_circle_outline : Icons.error_outline,
+                                      color: _isSuccessStatus
+                                          ? (isDark ? Colors.green[300] : Colors.green[800])
+                                          : (isDark ? Colors.red[300] : Colors.red[800]),
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        _statusMessage!,
+                                        style: TextStyle(
+                                          color: _isSuccessStatus
+                                              ? (isDark ? Colors.green[300] : Colors.green[900])
+                                              : (isDark ? Colors.red[300] : Colors.red[900]),
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
                           const SizedBox(height: 16),
-                          fastForwardDropdown,
                         ],
-                      );
-                    }
+                        Consumer(
+                          builder: (context, ref, child) {
+                            return ListenableBuilder(
+                              listenable: Listenable.merge([_serverController, _userController]),
+                              builder: (context, _) {
+                                final syncState = ref.watch(syncStatusNotifierProvider);
+                                final isSyncing = syncState.isSyncing;
+                                final isConfigured = _serverController.text.trim().isNotEmpty &&
+                                    _userController.text.trim().isNotEmpty;
 
-                    return Row(
-                      children: [
-                        Expanded(child: rewindDropdown),
-                        const SizedBox(width: 16),
-                        Expanded(child: fastForwardDropdown),
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    if (isSyncing) ...[
+                                      Row(
+                                        children: [
+                                          const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              syncState.currentTask ?? (isConfigured ? 'Syncing with gPodder...' : 'Refreshing local feeds...'),
+                                              style: Theme.of(context).textTheme.bodySmall,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                    ],
+                                    FilledButton.icon(
+                                      icon: isSyncing
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                            )
+                                          : const Icon(Icons.sync),
+                                      label: Text(
+                                        isSyncing
+                                            ? 'Processing...'
+                                            : (isConfigured ? 'Save & Sync with gPodder' : 'Refresh Local Feeds (Local Mode)'),
+                                      ),
+                                      onPressed: isSyncing
+                                          ? null
+                                          : () async {
+                                              await _saveNextcloudCredentials();
+                                              ref.read(podcastsNotifierProvider.notifier).refreshAll();
+                                            },
+                                    ),
+                                    if (isConfigured) ...[
+                                      const SizedBox(height: 8),
+                                      TextButton.icon(
+                                        icon: const Icon(Icons.refresh),
+                                        label: const Text('Force Full Re-sync (Retrieve all played positions)'),
+                                        onPressed: isSyncing
+                                            ? null
+                                            : () async {
+                                                await _saveNextcloudCredentials();
+                                                ref.read(podcastsNotifierProvider.notifier).refreshAll(forceFullResync: true);
+                                              },
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: OutlinedButton.icon(
+                                              icon: _isTesting
+                                                  ? const SizedBox(
+                                                      width: 18,
+                                                      height: 18,
+                                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                                    )
+                                                  : const Icon(Icons.cloud_done),
+                                              label: const Text('Test Connection'),
+                                              onPressed: _isTesting ? null : _testConnection,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: OutlinedButton.icon(
+                                              icon: const Icon(Icons.cloud_off, color: Colors.red),
+                                              label: const Text('Use Local Only'),
+                                              onPressed: () async {
+                                                final confirmed = await showDialog<bool>(
+                                                  context: context,
+                                                  builder: (ctx) => AlertDialog(
+                                                    title: const Text('Switch to Local Mode?'),
+                                                    content: const Text(
+                                                      'This will remove your Nextcloud server credentials from this device and stop gPodder synchronization.',
+                                                    ),
+                                                    actions: [
+                                                      TextButton(
+                                                        onPressed: () => Navigator.pop(ctx, false),
+                                                        child: const Text('Cancel'),
+                                                      ),
+                                                      FilledButton(
+                                                        style: FilledButton.styleFrom(
+                                                          backgroundColor: Theme.of(context).colorScheme.error,
+                                                        ),
+                                                        onPressed: () => Navigator.pop(ctx, true),
+                                                        child: const Text('Switch to Local'),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                );
+                                                if (confirmed == true) {
+                                                  await ref.read(syncServiceProvider).clearCredentials();
+                                                  setState(() {
+                                                    _serverController.clear();
+                                                    _userController.clear();
+                                                    _passwordController.clear();
+                                                    _statusMessage = 'Switched to standalone Local Mode.';
+                                                    _isSuccessStatus = true;
+                                                  });
+                                                }
+                                              },
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                );
+                              },
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        DropdownButtonFormField<int>(
+                          isExpanded: true,
+                          initialValue: const [0, 60, 180, 360, 720].contains(settings.periodicSyncIntervalMinutes)
+                              ? settings.periodicSyncIntervalMinutes
+                              : 180,
+                          decoration: const InputDecoration(
+                            labelText: 'Periodic Background Sync',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.schedule),
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 0, child: Text('Manual Only')),
+                            DropdownMenuItem(value: 60, child: Text('Every 1 Hour')),
+                            DropdownMenuItem(value: 180, child: Text('Every 3 Hours (Default)')),
+                            DropdownMenuItem(value: 360, child: Text('Every 6 Hours')),
+                            DropdownMenuItem(value: 720, child: Text('Every 12 Hours')),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) settingsNotifier.setPeriodicSyncIntervalMinutes(val);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        DropdownButtonFormField<SyncConflictPolicy>(
+                          isExpanded: true,
+                          initialValue: SyncConflictPolicy.values.contains(settings.syncConflictPolicy)
+                              ? settings.syncConflictPolicy
+                              : SyncConflictPolicy.furthestPosition,
+                          decoration: const InputDecoration(
+                            labelText: 'Sync Conflict Resolution',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.merge_type),
+                          ),
+                          items: SyncConflictPolicy.values.map((pol) {
+                            return DropdownMenuItem(value: pol, child: Text(pol.label));
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) settingsNotifier.setSyncConflictPolicy(val);
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Sync on App Launch'),
+                          subtitle: const Text('Automatically refresh feeds and sync episode progress upon opening the app'),
+                          value: settings.syncOnLaunch,
+                          onChanged: (val) => settingsNotifier.setSyncOnLaunch(val),
+                        ),
                       ],
-                    );
-                  },
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.save),
-                  label: const Text('Save Settings'),
-                  onPressed: _saveCredentials,
-                ),
-                const SizedBox(height: 24),
-                const Divider(),
-                const SizedBox(height: 16),
-                const Text(
-                  'OPML Management',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Import subscriptions from or export them to an OPML 2.0 file, compatible with antennaPod, Pocket Casts, and Apple Podcasts.',
-                  style: TextStyle(color: Colors.grey),
-                ),
-                const SizedBox(height: 16),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final isNarrow = constraints.maxWidth < 500;
-                    final exportBtn = OutlinedButton.icon(
-                      icon: const Icon(Icons.file_upload_outlined),
-                      label: const Text('Export OPML'),
-                      onPressed: _exportOpml,
-                    );
-                    final importBtn = ElevatedButton.icon(
-                      icon: const Icon(Icons.file_download_outlined),
-                      label: const Text('Import OPML'),
-                      onPressed: _showImportOpmlDialog,
-                    );
 
-                    if (isNarrow) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          exportBtn,
-                          const SizedBox(height: 12),
-                          importBtn,
-                        ],
-                      );
-                    }
-
-                    return Row(
+                // 5. DISCOVERY & OPML
+                _buildSectionHeader('Discovery & OPML', Icons.explore_outlined),
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Expanded(child: exportBtn),
-                        const SizedBox(width: 16),
-                        Expanded(child: importBtn),
+                        DropdownButtonFormField<PreferredSearchProvider>(
+                          isExpanded: true,
+                          initialValue: PreferredSearchProvider.values.contains(settings.preferredSearchProvider)
+                              ? settings.preferredSearchProvider
+                              : PreferredSearchProvider.itunes,
+                          decoration: const InputDecoration(
+                            labelText: 'Preferred Search Provider',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.travel_explore),
+                          ),
+                          items: PreferredSearchProvider.values.map((p) {
+                            return DropdownMenuItem(value: p, child: Text(p.label));
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) settingsNotifier.setPreferredSearchProvider(val);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: _podcastIndexKeyController,
+                          decoration: const InputDecoration(
+                            labelText: 'Custom Podcast Index API Key (Optional)',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.vpn_key_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _podcastIndexSecretController,
+                          obscureText: _obscurePodcastIndexSecret,
+                          decoration: InputDecoration(
+                            labelText: 'Custom Podcast Index API Secret (Optional)',
+                            border: const OutlineInputBorder(),
+                            prefixIcon: const Icon(Icons.password_outlined),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscurePodcastIndexSecret
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                              ),
+                              tooltip: _obscurePodcastIndexSecret ? 'Show secret' : 'Hide secret',
+                              onPressed: () {
+                                setState(() {
+                                  _obscurePodcastIndexSecret = !_obscurePodcastIndexSecret;
+                                });
+                              },
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _deviceIdController,
+                          decoration: const InputDecoration(
+                            labelText: 'Client Device Identifier',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.devices),
+                            helperText: 'Unique client identifier registered for Podcast Index and gPodder sync',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: FilledButton.icon(
+                            icon: const Icon(Icons.save_outlined),
+                            label: const Text('Save API Keys & Device ID'),
+                            onPressed: _saveDiscoverySettings,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        const SizedBox(height: 8),
+                        Text(
+                          'OPML Management',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Import subscriptions from or export them to an OPML 2.0 file, compatible with antennaPod, Pocket Casts, and Apple Podcasts.',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                        const SizedBox(height: 12),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final isNarrow = constraints.maxWidth < 500;
+                            final exportBtn = OutlinedButton.icon(
+                              icon: const Icon(Icons.file_upload_outlined),
+                              label: const Text('Export OPML'),
+                              onPressed: _exportOpml,
+                            );
+                            final importBtn = ElevatedButton.icon(
+                              icon: const Icon(Icons.file_download_outlined),
+                              label: const Text('Import OPML'),
+                              onPressed: _showImportOpmlDialog,
+                            );
+
+                            if (isNarrow) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  exportBtn,
+                                  const SizedBox(height: 12),
+                                  importBtn,
+                                ],
+                              );
+                            }
+
+                            return Row(
+                              children: [
+                                Expanded(child: exportBtn),
+                                const SizedBox(width: 16),
+                                Expanded(child: importBtn),
+                              ],
+                            );
+                          },
+                        ),
                       ],
-                    );
-                  },
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 24),
-                const Divider(),
-                const SizedBox(height: 16),
-                const Text(
-                  'Downloads & Storage',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Manage offline podcast episodes downloaded to your device.',
-                  style: TextStyle(color: Colors.grey),
-                ),
-                const SizedBox(height: 16),
-                _buildDownloadsStorageCard(context),
+                const SizedBox(height: 40),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0, left: 4.0),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -605,89 +1376,91 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       builder: (context, constraints) {
         final isNarrow = constraints.maxWidth < 500;
 
-        return Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Theme.of(context).dividerColor),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Row(
-                  children: [
-                    const Icon(Icons.folder_outlined, size: 28),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Offline Storage Used',
-                            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 2),
-                          storageAsync.when(
-                            data: (bytes) {
-                              final count = countAsync.valueOrNull ?? 0;
-                              return Text(
-                                '${_formatBytes(bytes)} across $count downloaded ${count == 1 ? 'episode' : 'episodes'}',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
-                              );
-                            },
-                            loading: () => const Text('Calculating...', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                            error: (err, st) => const Text('Storage calculation error', style: TextStyle(fontSize: 12, color: Colors.red)),
-                          ),
-                        ],
+                const Icon(Icons.folder_outlined, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Offline Storage Used',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
                       ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.refresh, size: 20),
-                      tooltip: 'Refresh storage info',
-                      onPressed: () {
-                        ref.invalidate(downloadStorageUsageBytesProvider);
-                        ref.invalidate(downloadedEpisodesCountProvider);
-                      },
-                    ),
-                    if (!isNarrow) ...[
-                      const SizedBox(width: 4),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
-                        icon: const Icon(Icons.delete_sweep_outlined, color: Colors.red, size: 18),
-                        label: const Text('Clear All'),
-                        onPressed: () => _showClearAllDownloadsDialog(context),
+                      const SizedBox(height: 2),
+                      storageAsync.when(
+                        data: (bytes) {
+                          final count = countAsync.valueOrNull ?? 0;
+                          return Text(
+                            '${_formatBytes(bytes)} across $count downloaded ${count == 1 ? 'episode' : 'episodes'}',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
+                          );
+                        },
+                        loading: () => const Text('Calculating...', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        error: (err, st) => const Text('Storage calculation error', style: TextStyle(fontSize: 12, color: Colors.red)),
                       ),
                     ],
-                  ],
+                  ),
                 ),
-                if (isNarrow) ...[
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
-                      icon: const Icon(Icons.delete_sweep_outlined, color: Colors.red, size: 18),
-                      label: const Text('Clear All Downloads'),
-                      onPressed: () => _showClearAllDownloadsDialog(context),
-                    ),
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 20),
+                  tooltip: 'Refresh storage info',
+                  onPressed: () {
+                    ref.invalidate(downloadStorageUsageBytesProvider);
+                    ref.invalidate(downloadedEpisodesCountProvider);
+                  },
+                ),
+                if (!isNarrow) ...[
+                  const SizedBox(width: 4),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+                    icon: _isClearingDownloads
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red),
+                          )
+                        : const Icon(Icons.delete_sweep_outlined, color: Colors.red, size: 18),
+                    label: const Text('Clear All'),
+                    onPressed: _isClearingDownloads ? null : () => _showClearAllDownloadsDialog(context),
                   ),
                 ],
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.tonalIcon(
-                    icon: const Icon(Icons.download_rounded, size: 18),
-                    label: const Text('Open Download Center'),
-                    onPressed: () {
-                      PodcastMerlinApp.mainShellKey.currentState?.navigateTo(2);
-                    },
-                  ),
-                ),
               ],
             ),
-          ),
+            if (isNarrow) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+                  icon: _isClearingDownloads
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red),
+                        )
+                      : const Icon(Icons.delete_sweep_outlined, color: Colors.red, size: 18),
+                  label: const Text('Clear All Downloads'),
+                  onPressed: _isClearingDownloads ? null : () => _showClearAllDownloadsDialog(context),
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                icon: const Icon(Icons.download_rounded, size: 18),
+                label: const Text('Open Download Center'),
+                onPressed: () {
+                  PodcastMerlinApp.mainShellKey.currentState?.navigateTo(2);
+                },
+              ),
+            ),
+          ],
         );
       },
     );
@@ -728,81 +1501,19 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     );
 
     if (confirmed == true) {
-      final deleted = await ref.read(episodeDownloadServiceProvider).clearAllDownloads();
-      ref.invalidate(downloadStorageUsageBytesProvider);
-      ref.invalidate(downloadedEpisodesCountProvider);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Cleared $deleted downloaded audio ${deleted == 1 ? 'file' : 'files'}')),
-        );
+      setState(() => _isClearingDownloads = true);
+      try {
+        final deleted = await ref.read(episodeDownloadServiceProvider).clearAllDownloads();
+        ref.invalidate(downloadStorageUsageBytesProvider);
+        ref.invalidate(downloadedEpisodesCountProvider);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Cleared $deleted downloaded audio ${deleted == 1 ? 'file' : 'files'}')),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _isClearingDownloads = false);
       }
     }
-  }
-
-  Widget _buildAppearanceCard(BuildContext context) {
-    final themeSettings = ref.watch(themeSettingsProvider);
-
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Theme.of(context).dividerColor),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Theme Mode',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: SegmentedButton<ThemeMode>(
-                segments: const [
-                  ButtonSegment<ThemeMode>(
-                    value: ThemeMode.system,
-                    label: Text('System'),
-                    icon: Icon(Icons.brightness_auto),
-                  ),
-                  ButtonSegment<ThemeMode>(
-                    value: ThemeMode.light,
-                    label: Text('Light'),
-                    icon: Icon(Icons.light_mode),
-                  ),
-                  ButtonSegment<ThemeMode>(
-                    value: ThemeMode.dark,
-                    label: Text('Dark'),
-                    icon: Icon(Icons.dark_mode),
-                  ),
-                ],
-                selected: {themeSettings.themeMode},
-                onSelectionChanged: (newSelection) {
-                  if (newSelection.isNotEmpty) {
-                    ref.read(themeSettingsProvider.notifier).setThemeMode(newSelection.first);
-                  }
-                },
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Divider(),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              secondary: const Icon(Icons.color_lens_outlined),
-              title: const Text('Use system theme color'),
-              subtitle: const Text(
-                'Adapts brand and accent colors to your OS system theme or wallpaper (Android 12+, Windows, macOS, Linux).',
-              ),
-              value: themeSettings.useDynamicColor,
-              onChanged: (val) {
-                ref.read(themeSettingsProvider.notifier).setUseDynamicColor(val);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }

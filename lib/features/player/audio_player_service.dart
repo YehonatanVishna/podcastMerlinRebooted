@@ -8,6 +8,7 @@ import '../../core/database/database_helper.dart';
 import '../../core/database/ffi_init.dart';
 import '../../core/models/episode.dart';
 import '../../core/models/gpodder_action.dart';
+import '../../core/models/app_settings.dart';
 import '../../core/services/image_cache_service.dart';
 import '../sync/secure_storage_service.dart';
 import '../sync/sync_service.dart';
@@ -28,6 +29,15 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   List<Episode> _queue = [];
   final StreamController<List<Episode>> _queueController =
       StreamController<List<Episode>>.broadcast();
+
+  // Configurable playback settings
+  bool autoAdvanceQueue = true;
+  int markAsPlayedThresholdSeconds = 60;
+  AutoFocusLossAction audioFocusLossAction = AutoFocusLossAction.pauseAndResume;
+  int sleepTimerFadeOutSeconds = 15;
+  bool skipSilence = false;
+  bool autoDeleteAfterPlay = true;
+  void Function(Episode episode)? onEpisodeCompleted;
 
   // Sleep timer state
   Timer? _sleepTimer;
@@ -87,6 +97,55 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     await _restoreLastPlayback();
   }
 
+  Future<MediaItem> _createMediaItem(Episode ep, {String? fallbackShowTitle}) async {
+    final cleanTitle = ep.title.trim().isNotEmpty ? ep.title.trim() : 'Podcast Episode';
+
+    String showTitle = fallbackShowTitle?.trim() ?? '';
+    if (showTitle.isEmpty) {
+      if (ep.podcastId != null && ep.podcastId! > 0) {
+        final pod = await _db.getPodcastById(ep.podcastId!);
+        if (pod != null && pod.title.trim().isNotEmpty) {
+          showTitle = pod.title.trim();
+        }
+      }
+    }
+    if (showTitle.isEmpty && ep.podcastRss.trim().isNotEmpty) {
+      final pod = await _db.getPodcastByRssUrl(ep.podcastRss);
+      if (pod != null && pod.title.trim().isNotEmpty) {
+        showTitle = pod.title.trim();
+      }
+    }
+    if (showTitle.isEmpty) {
+      showTitle = 'Podcast Merlin';
+    }
+
+    Uri? artUri;
+    if (ep.imageUrl.isNotEmpty) {
+      if (!kIsWeb) {
+        final cachedFilePath = await ImageCacheService.getCachedFilePath(ep.imageUrl);
+        if (cachedFilePath != null) {
+          artUri = Uri.file(cachedFilePath);
+        } else {
+          artUri = Uri.tryParse(ep.imageUrl);
+        }
+      } else {
+        artUri = Uri.tryParse(ep.imageUrl);
+      }
+    }
+
+    return MediaItem(
+      id: ep.mediaUrl,
+      album: showTitle,
+      artist: showTitle,
+      title: cleanTitle,
+      displayTitle: cleanTitle,
+      displaySubtitle: showTitle,
+      displayDescription: showTitle,
+      artUri: artUri,
+      duration: Duration(seconds: ep.duration),
+    );
+  }
+
   Future<void> _restoreLastPlayback() async {
     try {
       final activeEp = await _db.getActivePlayback();
@@ -97,14 +156,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         if (_queue.isNotEmpty) {
           final firstQueued = _queue.first;
           _currentEpisode = firstQueued.copyWith(position: 0);
-          final newItem = MediaItem(
-            id: firstQueued.mediaUrl,
-            album: firstQueued.podcastRss.isNotEmpty ? firstQueued.podcastRss : 'Podcast Merlin',
-            artist: firstQueued.podcastRss.isNotEmpty ? firstQueued.podcastRss : 'Podcast Merlin',
-            title: firstQueued.title,
-            artUri: firstQueued.imageUrl.isNotEmpty ? Uri.tryParse(firstQueued.imageUrl) : null,
-            duration: Duration(seconds: firstQueued.duration),
-          );
+          final newItem = await _createMediaItem(firstQueued);
           mediaItem.add(newItem);
           playbackState.add(playbackState.value.copyWith(
             controls: [
@@ -139,28 +191,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         ImageCacheService.precacheImageUrl(activeEp.imageUrl);
       }
 
-      Uri? artUri;
-      if (activeEp.imageUrl.isNotEmpty) {
-        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
-          final cachedFilePath = await ImageCacheService.getCachedFilePath(activeEp.imageUrl);
-          if (cachedFilePath != null) {
-            artUri = Uri.file(cachedFilePath);
-          } else {
-            artUri = Uri.tryParse(activeEp.imageUrl);
-          }
-        } else {
-          artUri = Uri.tryParse(activeEp.imageUrl);
-        }
-      }
-
-      final newItem = MediaItem(
-        id: activeEp.mediaUrl,
-        album: showTitle,
-        artist: showTitle,
-        title: activeEp.title,
-        artUri: artUri,
-        duration: Duration(seconds: activeEp.duration),
-      );
+      final newItem = await _createMediaItem(activeEp, fallbackShowTitle: showTitle);
       mediaItem.add(newItem);
 
       final restoredState = playbackState.value.copyWith(
@@ -220,6 +251,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     if (hasLocalFile) {
       try {
         await _player.setFilePath(localPath, initialPosition: initialPos).timeout(const Duration(seconds: 30));
+        await _applyPlayerSettings();
         return;
       } catch (e) {
         if (kDebugMode) {
@@ -228,6 +260,22 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       }
     }
     await _player.setUrl(ep.mediaUrl, initialPosition: initialPos).timeout(const Duration(seconds: 30));
+    await _applyPlayerSettings();
+  }
+
+  Future<void> _applyPlayerSettings() async {
+    try {
+      if (urlLoader == null) {
+        if (_speed != 1.0) {
+          await _player.setSpeed(_speed);
+        }
+        if (skipSilence) {
+          try {
+            await _player.setSkipSilenceEnabled(true);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
   }
 
   Stream<PositionUpdateEvent> get onPositionUpdated => _positionUpdateController.stream;
@@ -282,26 +330,37 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration.speech());
 
-      _interruptionSub = session.interruptionEventStream.listen((event) {
+      _interruptionSub = session.interruptionEventStream.listen((event) async {
         if (event.begin) {
           switch (event.type) {
             case AudioInterruptionType.duck:
-              _player.setVolume(0.5);
+              if (audioFocusLossAction == AutoFocusLossAction.duck) {
+                await _player.setVolume(0.5).catchError((_) {});
+              } else {
+                _wasPlayingBeforeInterruption = _player.playing;
+                await pause();
+              }
               break;
             case AudioInterruptionType.pause:
             case AudioInterruptionType.unknown:
               _wasPlayingBeforeInterruption = _player.playing;
-              pause();
+              await pause();
               break;
           }
         } else {
           switch (event.type) {
             case AudioInterruptionType.duck:
-              _player.setVolume(1.0);
+              if (audioFocusLossAction == AutoFocusLossAction.duck) {
+                await _player.setVolume(1.0).catchError((_) {});
+              } else {
+                if (_wasPlayingBeforeInterruption) {
+                  await play();
+                }
+              }
               break;
             case AudioInterruptionType.pause:
               if (_wasPlayingBeforeInterruption) {
-                play();
+                await play();
               }
               break;
             case AudioInterruptionType.unknown:
@@ -310,8 +369,8 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         }
       });
 
-      _becomingNoisySub = session.becomingNoisyEventStream.listen((_) {
-        pause();
+      _becomingNoisySub = session.becomingNoisyEventStream.listen((_) async {
+        await pause();
       });
     } catch (e) {
       if (kDebugMode) print('AudioSession initialization error: $e');
@@ -544,32 +603,13 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       ImageCacheService.precacheImageUrl(epToPlay.imageUrl);
     }
 
-    // Use local file URI for MPRIS/OS playback art if on Linux and cached; use network URL on Android/Web
-    Uri? artUri;
-    if (epToPlay.imageUrl.isNotEmpty) {
-      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
-        final cachedFilePath = await ImageCacheService.getCachedFilePath(epToPlay.imageUrl);
-        if (cachedFilePath != null) {
-          artUri = Uri.file(cachedFilePath);
-        } else {
-          artUri = Uri.tryParse(epToPlay.imageUrl);
-        }
-      } else {
-        artUri = Uri.tryParse(epToPlay.imageUrl);
-      }
-    }
-
+    final newItem = await _createMediaItem(epToPlay, fallbackShowTitle: showTitle);
     if (currentRequestId != _playRequestId) return;
-
-    final newItem = MediaItem(
-      id: epToPlay.mediaUrl,
-      album: showTitle,
-      artist: showTitle,
-      title: epToPlay.title,
-      artUri: artUri,
-      duration: Duration(seconds: epToPlay.duration),
-    );
     mediaItem.add(newItem);
+    // Yield a tick so audio_service's mediaItem listener dispatches SetMediaItemRequest
+    // to the platform before playbackState transitions to playing: true (which invokes startForeground)
+    await Future.delayed(Duration.zero);
+    if (currentRequestId != _playRequestId) return;
 
     final initialLoadingState = playbackState.value.copyWith(
       controls: [
@@ -722,6 +762,13 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
 
     if (_currentEpisode == null) {
       return;
+    }
+
+    // Ensure valid MediaItem exists before starting playback
+    if (mediaItem.value == null || mediaItem.value!.id != _currentEpisode!.mediaUrl) {
+      final item = await _createMediaItem(_currentEpisode!);
+      mediaItem.add(item);
+      await Future.delayed(Duration.zero);
     }
 
     if (_preparingSourceCompleter != null) {
@@ -962,8 +1009,13 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
 
     bool isPlayed = false;
     if (totalSec > 0 && currentSec > 0) {
-      if (totalSec > 60) {
-        if ((totalSec - currentSec) <= 60) {
+      final threshold = markAsPlayedThresholdSeconds;
+      if (threshold <= 0) {
+        if (currentSec >= totalSec) {
+          isPlayed = true;
+        }
+      } else if (totalSec > threshold) {
+        if ((totalSec - currentSec) <= threshold) {
           isPlayed = true;
         }
       } else {
@@ -1066,15 +1118,22 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     }
     _stopPeriodicPositionSync();
 
+    final completedEp = _currentEpisode;
+
+    // Notify listeners (e.g. for auto-deletion of played downloads)
+    if (completedEp != null && autoDeleteAfterPlay) {
+      try {
+        onEpisodeCompleted?.call(completedEp);
+      } catch (_) {}
+    }
+
     // Check Sleep Timer: if endOfEpisode, stop and cancel timer!
     if (_sleepTimerMode == SleepTimerMode.endOfEpisode) {
       cancelSleepTimer();
       await _resetPlaybackSessionToIdle();
       return;
-    }
-
-    // Automatically pop and play next episode if queue has items!
-    if (_queue.isNotEmpty) {
+    } else if (autoAdvanceQueue && _queue.isNotEmpty) {
+      // Automatically pop and play next episode if autoAdvanceQueue is enabled and queue has items!
       await playNextInQueue();
     } else {
       await _resetPlaybackSessionToIdle();
@@ -1114,14 +1173,21 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   void _syncMediaItemQueue() {
-    final mediaItems = _queue.map((ep) => MediaItem(
-      id: ep.mediaUrl,
-      album: ep.podcastRss,
-      artist: ep.podcastRss,
-      title: ep.title,
-      duration: Duration(seconds: ep.duration),
-      artUri: Uri.tryParse(ep.imageUrl),
-    )).toList();
+    final mediaItems = _queue.map((ep) {
+      final cleanTitle = ep.title.trim().isNotEmpty ? ep.title.trim() : 'Podcast Episode';
+      final showTitle = ep.podcastRss.trim().isNotEmpty ? ep.podcastRss.trim() : 'Podcast Merlin';
+      return MediaItem(
+        id: ep.mediaUrl,
+        album: showTitle,
+        artist: showTitle,
+        title: cleanTitle,
+        displayTitle: cleanTitle,
+        displaySubtitle: showTitle,
+        displayDescription: showTitle,
+        duration: Duration(seconds: ep.duration),
+        artUri: ep.imageUrl.isNotEmpty ? Uri.tryParse(ep.imageUrl) : null,
+      );
+    }).toList();
     queue.add(mediaItems);
     if (!_queueController.isClosed) {
       _queueController.add(List.unmodifiable(_queue));
@@ -1195,9 +1261,9 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
           _sleepTimerController.add(_sleepTimerRemaining);
         }
 
-        // Smooth volume fade out in the last 15 seconds
-        if (_sleepTimerRemaining!.inSeconds <= 15) {
-          final fade = (_sleepTimerRemaining!.inSeconds / 15.0).clamp(0.05, 1.0);
+        // Smooth volume fade out in the last seconds (if enabled)
+        if (sleepTimerFadeOutSeconds > 0 && _sleepTimerRemaining!.inSeconds <= sleepTimerFadeOutSeconds) {
+          final fade = (_sleepTimerRemaining!.inSeconds / sleepTimerFadeOutSeconds.toDouble()).clamp(0.05, 1.0);
           if (urlLoader == null) {
             await _player.setVolume(fade);
           }
@@ -1263,6 +1329,40 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     if (!_seekDurationsController.isClosed) {
       _seekDurationsController.add((rewind: rewindDuration, fastForward: fastForwardDuration));
     }
+  }
+
+  void setDefaultSpeed(double speed) {
+    _speed = speed;
+    setSpeed(speed);
+  }
+
+  void setAutoAdvance(bool autoAdvance) {
+    autoAdvanceQueue = autoAdvance;
+  }
+
+  void setMarkPlayedThreshold(int seconds) {
+    markAsPlayedThresholdSeconds = seconds;
+  }
+
+  void setAutoFocusAction(AutoFocusLossAction action) {
+    audioFocusLossAction = action;
+  }
+
+  void setSleepTimerFadeDuration(int seconds) {
+    sleepTimerFadeOutSeconds = seconds;
+  }
+
+  Future<void> setSkipSilence(bool skip) async {
+    skipSilence = skip;
+    try {
+      if (urlLoader == null) {
+        await _player.setSkipSilenceEnabled(skip);
+      }
+    } catch (_) {}
+  }
+
+  void setAutoDeleteAfterPlay(bool enabled) {
+    autoDeleteAfterPlay = enabled;
   }
 
   void dispose() {
