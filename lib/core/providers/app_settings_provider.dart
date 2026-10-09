@@ -38,6 +38,12 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
         }
       }
 
+      // Purge deprecated Podcast Index keys from secure storage if present
+      try {
+        await _storage.delete('podcast_index_api_key');
+        await _storage.delete('podcast_index_api_secret');
+      } catch (_) {}
+
       // Check legacy individual keys for backward-compatibility if JSON didn't exist
       if (jsonStr == null || jsonStr.isEmpty) {
         final legacyValues = await Future.wait([
@@ -236,7 +242,6 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
   void setPeriodicSyncIntervalMinutes(int mins) => _update((s) => s.copyWith(periodicSyncIntervalMinutes: mins));
   void setSyncConflictPolicy(SyncConflictPolicy policy) => _update((s) => s.copyWith(syncConflictPolicy: policy));
   void setDeviceId(String id) => _update((s) => s.copyWith(deviceId: id));
-  void setPreferredSearchProvider(PreferredSearchProvider prov) => _update((s) => s.copyWith(preferredSearchProvider: prov));
 }
 
 final appSettingsProvider = StateNotifierProvider<AppSettingsNotifier, AppSettings>((ref) {

@@ -104,22 +104,32 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     }
   }
 
-  Future<void> _saveDiscoverySettings() async {
-    final settingsNotifier = ref.read(appSettingsProvider.notifier);
-    if (_deviceIdController.text.trim().isNotEmpty) {
-      settingsNotifier.setDeviceId(_deviceIdController.text.trim());
+  Future<bool> _saveDeviceId() async {
+    final deviceId = _deviceIdController.text.trim();
+    if (deviceId.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Device ID cannot be empty')),
+        );
+      }
+      return false;
     }
+
+    final settingsNotifier = ref.read(appSettingsProvider.notifier);
+    settingsNotifier.setDeviceId(deviceId);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Device ID saved')),
       );
     }
+    return true;
   }
 
   Future<void> _saveCredentials() async {
     await _saveNextcloudCredentials();
-    await _saveDiscoverySettings();
+    final deviceIdSaved = await _saveDeviceId();
+    if (!deviceIdSaved) return;
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Settings saved successfully')),
@@ -1190,25 +1200,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           value: settings.syncOnLaunch,
                           onChanged: (val) => settingsNotifier.setSyncOnLaunch(val),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // 5. DISCOVERY & OPML
-                _buildSectionHeader('Discovery & OPML', Icons.explore_outlined),
-                Card(
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: Theme.of(context).dividerColor),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        const SizedBox(height: 8),
                         TextField(
                           controller: _deviceIdController,
                           decoration: const InputDecoration(
@@ -1224,24 +1218,35 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           child: FilledButton.icon(
                             icon: const Icon(Icons.save_outlined),
                             label: const Text('Save Device ID'),
-                            onPressed: _saveDiscoverySettings,
+                            onPressed: _saveDeviceId,
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        const Divider(),
-                        const SizedBox(height: 8),
-                        Text(
-                          'OPML Management',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 4),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // 5. OPML MANAGEMENT
+                _buildSectionHeader('OPML Management', Icons.folder_zip_outlined),
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
                         Text(
                           'Import subscriptions from or export them to an OPML 2.0 file, compatible with antennaPod, Pocket Casts, and Apple Podcasts.',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                               ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
                         LayoutBuilder(
                           builder: (context, constraints) {
                             final isNarrow = constraints.maxWidth < 500;

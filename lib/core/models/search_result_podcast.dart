@@ -23,19 +23,4 @@ class SearchResultPodcast {
     required this.providerId,
   });
 
-
-  Map<String, dynamic> toJson() {
-    return {
-      'title': title,
-      'author': author,
-      'rssUrl': rssUrl,
-      'imageUrl': imageUrl,
-      'description': description,
-      'websiteUrl': websiteUrl,
-      'categories': categories,
-      'episodeCount': episodeCount,
-      'language': language,
-      'providerId': providerId,
-    };
-  }
 }
