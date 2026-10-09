@@ -14,7 +14,6 @@ import '../../features/sync/gpodder_api_client.dart';
 import '../../features/sync/secure_storage_service.dart';
 import '../../features/sync/sync_service.dart';
 import '../../features/discovery/multisource_search_service.dart';
-import '../../features/discovery/podcast_index_provider.dart';
 import '../../features/discovery/discovery_notifier.dart';
 import '../../features/downloads/episode_download_service.dart';
 import 'app_settings_provider.dart';
@@ -716,11 +715,7 @@ final failedEpisodesListProvider =
 });
 
 final multisourceSearchServiceProvider = Provider<MultisourceSearchService>((ref) {
-  final service = MultisourceSearchService();
-  service.registerProvider(PodcastIndexProvider(
-    storage: ref.watch(secureStorageProvider),
-  ));
-  return service;
+  return MultisourceSearchService();
 });
 
 final discoveryNotifierProvider =

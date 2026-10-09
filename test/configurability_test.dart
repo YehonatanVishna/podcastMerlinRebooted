@@ -90,9 +90,7 @@ void main() {
         periodicSyncIntervalMinutes: 60,
         syncConflictPolicy: SyncConflictPolicy.latestTimestamp,
         deviceId: 'custom_device_id',
-        preferredSearchProvider: PreferredSearchProvider.podcastIndex,
-        podcastIndexApiKey: 'my_key',
-        podcastIndexApiSecret: 'my_secret',
+        preferredSearchProvider: PreferredSearchProvider.itunes,
       );
 
       final jsonMap = original.toJson();
@@ -122,9 +120,7 @@ void main() {
       expect(parsed.periodicSyncIntervalMinutes, 60);
       expect(parsed.syncConflictPolicy, SyncConflictPolicy.latestTimestamp);
       expect(parsed.deviceId, 'custom_device_id');
-      expect(parsed.preferredSearchProvider, PreferredSearchProvider.podcastIndex);
-      expect(parsed.podcastIndexApiKey, 'my_key');
-      expect(parsed.podcastIndexApiSecret, 'my_secret');
+      expect(parsed.preferredSearchProvider, PreferredSearchProvider.itunes);
     });
 
     test('fromJson gracefully falls back to defaults when encountering unknown enum values or corrupted types', () {
@@ -309,7 +305,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Discovery & OPML'), findsOneWidget);
-      expect(find.text('Save API Keys & Device ID'), findsOneWidget);
+      expect(find.text('Save Device ID'), findsOneWidget);
     });
 
     testWidgets('Tapping theme choice chip updates appSettingsProvider', (tester) async {

@@ -20,13 +20,10 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   final _serverController = TextEditingController();
   final _userController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _podcastIndexKeyController = TextEditingController();
-  final _podcastIndexSecretController = TextEditingController();
   final _deviceIdController = TextEditingController();
 
   bool _isLoading = true;
   bool _isTesting = false;
-  bool _obscurePodcastIndexSecret = true;
   String? _statusMessage;
   bool _isSuccessStatus = false;
   int? _imageCacheBytes;
@@ -50,8 +47,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     _serverController.text = await storage.read(SecureStorageService.keyServerUrl) ?? '';
     _userController.text = await storage.read(SecureStorageService.keyUsername) ?? '';
     _passwordController.text = await storage.read(SecureStorageService.keyPassword) ?? '';
-    _podcastIndexKeyController.text = settings.podcastIndexApiKey;
-    _podcastIndexSecretController.text = settings.podcastIndexApiSecret;
     _deviceIdController.text = settings.deviceId;
 
     _refreshImageCacheSize();
@@ -82,8 +77,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     _serverController.dispose();
     _userController.dispose();
     _passwordController.dispose();
-    _podcastIndexKeyController.dispose();
-    _podcastIndexSecretController.dispose();
     _deviceIdController.dispose();
     super.dispose();
   }
@@ -113,17 +106,13 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
   Future<void> _saveDiscoverySettings() async {
     final settingsNotifier = ref.read(appSettingsProvider.notifier);
-    settingsNotifier.setPodcastIndexCredentials(
-      _podcastIndexKeyController.text.trim(),
-      _podcastIndexSecretController.text.trim(),
-    );
     if (_deviceIdController.text.trim().isNotEmpty) {
       settingsNotifier.setDeviceId(_deviceIdController.text.trim());
     }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('API Keys & Device ID saved')),
+        const SnackBar(content: Text('Device ID saved')),
       );
     }
   }
@@ -1220,63 +1209,13 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        DropdownButtonFormField<PreferredSearchProvider>(
-                          isExpanded: true,
-                          initialValue: PreferredSearchProvider.values.contains(settings.preferredSearchProvider)
-                              ? settings.preferredSearchProvider
-                              : PreferredSearchProvider.itunes,
-                          decoration: const InputDecoration(
-                            labelText: 'Preferred Search Provider',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.travel_explore),
-                          ),
-                          items: PreferredSearchProvider.values.map((p) {
-                            return DropdownMenuItem(value: p, child: Text(p.label));
-                          }).toList(),
-                          onChanged: (val) {
-                            if (val != null) settingsNotifier.setPreferredSearchProvider(val);
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: _podcastIndexKeyController,
-                          decoration: const InputDecoration(
-                            labelText: 'Custom Podcast Index API Key (Optional)',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.vpn_key_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _podcastIndexSecretController,
-                          obscureText: _obscurePodcastIndexSecret,
-                          decoration: InputDecoration(
-                            labelText: 'Custom Podcast Index API Secret (Optional)',
-                            border: const OutlineInputBorder(),
-                            prefixIcon: const Icon(Icons.password_outlined),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscurePodcastIndexSecret
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                              ),
-                              tooltip: _obscurePodcastIndexSecret ? 'Show secret' : 'Hide secret',
-                              onPressed: () {
-                                setState(() {
-                                  _obscurePodcastIndexSecret = !_obscurePodcastIndexSecret;
-                                });
-                              },
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
                         TextField(
                           controller: _deviceIdController,
                           decoration: const InputDecoration(
                             labelText: 'Client Device Identifier',
                             border: OutlineInputBorder(),
                             prefixIcon: Icon(Icons.devices),
-                            helperText: 'Unique client identifier registered for Podcast Index and gPodder sync',
+                            helperText: 'Unique client identifier registered for gPodder sync',
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -1284,7 +1223,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           alignment: Alignment.centerRight,
                           child: FilledButton.icon(
                             icon: const Icon(Icons.save_outlined),
-                            label: const Text('Save API Keys & Device ID'),
+                            label: const Text('Save Device ID'),
                             onPressed: _saveDiscoverySettings,
                           ),
                         ),

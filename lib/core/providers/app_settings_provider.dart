@@ -43,15 +43,11 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
         final legacyValues = await Future.wait([
           _storage.read(SecureStorageService.keyRewindDuration),
           _storage.read(SecureStorageService.keyFastForwardDuration),
-          _storage.read(SecureStorageService.keyPodcastIndexApiKey),
-          _storage.read(SecureStorageService.keyPodcastIndexApiSecret),
           _storage.read(SecureStorageService.keyDeviceId),
         ]);
         final rew = legacyValues[0];
         final ff = legacyValues[1];
-        final piKey = legacyValues[2];
-        final piSecret = legacyValues[3];
-        final devId = legacyValues[4];
+        final devId = legacyValues[2];
 
         int rewSec = loaded.rewindDurationSeconds;
         int ffSec = loaded.fastForwardDurationSeconds;
@@ -61,8 +57,6 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
         loaded = loaded.copyWith(
           rewindDurationSeconds: rewSec,
           fastForwardDurationSeconds: ffSec,
-          podcastIndexApiKey: (piKey != null && piKey.isNotEmpty) ? piKey : loaded.podcastIndexApiKey,
-          podcastIndexApiSecret: (piSecret != null && piSecret.isNotEmpty) ? piSecret : loaded.podcastIndexApiSecret,
           deviceId: (devId != null && devId.isNotEmpty) ? devId : loaded.deviceId,
         );
       }
@@ -144,12 +138,6 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
       // Also persist legacy keys for compatibility
       await _storage.write(SecureStorageService.keyRewindDuration, target.rewindDurationSeconds.toString());
       await _storage.write(SecureStorageService.keyFastForwardDuration, target.fastForwardDurationSeconds.toString());
-      if (target.podcastIndexApiKey.isNotEmpty) {
-        await _storage.write(SecureStorageService.keyPodcastIndexApiKey, target.podcastIndexApiKey);
-      }
-      if (target.podcastIndexApiSecret.isNotEmpty) {
-        await _storage.write(SecureStorageService.keyPodcastIndexApiSecret, target.podcastIndexApiSecret);
-      }
       await _storage.write(SecureStorageService.keyDeviceId, target.deviceId);
     } catch (e) {
       if (kDebugMode) print('Failed persisting app settings: $e');
@@ -249,10 +237,6 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
   void setSyncConflictPolicy(SyncConflictPolicy policy) => _update((s) => s.copyWith(syncConflictPolicy: policy));
   void setDeviceId(String id) => _update((s) => s.copyWith(deviceId: id));
   void setPreferredSearchProvider(PreferredSearchProvider prov) => _update((s) => s.copyWith(preferredSearchProvider: prov));
-  void setPodcastIndexCredentials(String key, String secret) => _update((s) => s.copyWith(
-    podcastIndexApiKey: key,
-    podcastIndexApiSecret: secret,
-  ));
 }
 
 final appSettingsProvider = StateNotifierProvider<AppSettingsNotifier, AppSettings>((ref) {

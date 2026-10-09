@@ -92,8 +92,7 @@ enum SyncConflictPolicy {
 }
 
 enum PreferredSearchProvider {
-  itunes('Apple Podcasts (iTunes)'),
-  podcastIndex('Podcast Index');
+  itunes('Apple Podcasts (iTunes)');
 
   final String label;
   const PreferredSearchProvider(this.label);
@@ -203,8 +202,6 @@ class AppSettings {
   final SyncConflictPolicy syncConflictPolicy;
   final String deviceId;
   final PreferredSearchProvider preferredSearchProvider;
-  final String podcastIndexApiKey;
-  final String podcastIndexApiSecret;
 
   const AppSettings({
     this.themeMode = AppThemeMode.system,
@@ -239,8 +236,6 @@ class AppSettings {
     this.syncConflictPolicy = SyncConflictPolicy.furthestPosition,
     this.deviceId = 'podcast_merlin_flutter',
     this.preferredSearchProvider = PreferredSearchProvider.itunes,
-    this.podcastIndexApiKey = '',
-    this.podcastIndexApiSecret = '',
   });
 
   AppSettings copyWith({
@@ -278,8 +273,6 @@ class AppSettings {
     SyncConflictPolicy? syncConflictPolicy,
     String? deviceId,
     PreferredSearchProvider? preferredSearchProvider,
-    String? podcastIndexApiKey,
-    String? podcastIndexApiSecret,
   }) {
     AutoDeletePlayedPolicy resolvedPolicy = autoDeletePlayed ?? this.autoDeletePlayed;
     bool resolvedAutoDeleteAfterPlay = autoDeleteAfterPlay ?? this.autoDeleteAfterPlay;
@@ -328,8 +321,6 @@ class AppSettings {
       syncConflictPolicy: syncConflictPolicy ?? this.syncConflictPolicy,
       deviceId: deviceId ?? this.deviceId,
       preferredSearchProvider: preferredSearchProvider ?? this.preferredSearchProvider,
-      podcastIndexApiKey: podcastIndexApiKey ?? this.podcastIndexApiKey,
-      podcastIndexApiSecret: podcastIndexApiSecret ?? this.podcastIndexApiSecret,
     );
   }
 
@@ -367,8 +358,6 @@ class AppSettings {
       'syncConflictPolicy': syncConflictPolicy.name,
       'deviceId': deviceId,
       'preferredSearchProvider': preferredSearchProvider.name,
-      'podcastIndexApiKey': podcastIndexApiKey,
-      'podcastIndexApiSecret': podcastIndexApiSecret,
     };
   }
 
@@ -525,8 +514,6 @@ class AppSettings {
       syncConflictPolicy: parseSyncConflict(json['syncConflictPolicy']),
       deviceId: parseString(json['deviceId'], 'podcast_merlin_flutter'),
       preferredSearchProvider: parseSearchProvider(json['preferredSearchProvider']),
-      podcastIndexApiKey: parseString(json['podcastIndexApiKey'], ''),
-      podcastIndexApiSecret: parseString(json['podcastIndexApiSecret'], ''),
     );
   }
 }

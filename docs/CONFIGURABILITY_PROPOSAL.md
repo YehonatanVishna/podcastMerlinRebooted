@@ -70,8 +70,7 @@ This document details the discovered hardcoded behaviors, proposes high-value co
 
 | Current Hardcoded Behavior | File Reference | Proposed Configurable Setting | Proposed Default | Control Type | Description & Rationale |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Search engine selection** resets to iTunes on restart. | [`lib/features/discovery/multisource_search_service.dart:7`](file:///home/yehonatanv/projects/podcastMerlinRebooted/.worktrees/configurability/lib/features/discovery/multisource_search_service.dart#L7) | **Preferred Search Provider** | `Apple Podcasts` | Dropdown (`Apple Podcasts`, `Podcast Index`) | Remembers user choice between Apple Podcasts and Podcast Index. |
-| **PodcastIndex API credentials** inputs are missing from UI. | [`lib/features/discovery/podcast_index_provider.dart:13`](file:///home/yehonatanv/projects/podcastMerlinRebooted/.worktrees/configurability/lib/features/discovery/podcast_index_provider.dart#L13) | **Custom PodcastIndex API Keys** | Empty | Text Fields with validation | Allows using personal API keys for unrestricted directory access. |
+| **Search engine selection** resets to iTunes on restart. | [`lib/features/discovery/multisource_search_service.dart:7`](file:///home/yehonatanv/projects/podcastMerlinRebooted/.worktrees/configurability/lib/features/discovery/multisource_search_service.dart#L7) | **Preferred Search Provider** | `Apple Podcasts` | Dropdown | Remembers user choice for discovery. |
 | **Image cache grows unbounded** without size info or manual clearing. | [`lib/core/services/image_cache_service.dart:18`](file:///home/yehonatanv/projects/podcastMerlinRebooted/.worktrees/configurability/lib/core/services/image_cache_service.dart#L18) | **Image Cache Management** | N/A | Storage indicator + "Clear Cache" button | Displays cached artwork disk usage and lets users reclaim storage. |
 
 ---
@@ -129,5 +128,5 @@ flowchart TD
 
 ### Phase 4: Sync Automation & Discovery Settings
 - [ ] Implement sync-on-launch and periodic sync timer in `main_shell.dart`.
-- [ ] Persist discovery provider preference and add custom PodcastIndex API credentials UI to `settings_view.dart`.
+- [ ] Persist discovery provider preference in `settings_view.dart`.
 - [ ] Reorganize `settings_view.dart` into categorized, accessible sections with clean styling.

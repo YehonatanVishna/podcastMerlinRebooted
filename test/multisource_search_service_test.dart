@@ -68,13 +68,13 @@ void main() {
     });
 
     test('switches active provider correctly', () async {
-      final p1 = MockSearchProvider('podcast_index', 'Podcast Index');
+      final p1 = MockSearchProvider('custom_source', 'Custom Directory');
       final p2 = MockSearchProvider('itunes', 'iTunes');
 
       final service = MultisourceSearchService(initialProvider: p1);
       service.registerProvider(p2);
 
-      expect(service.activeProvider.displayName, 'Podcast Index');
+      expect(service.activeProvider.displayName, 'Custom Directory');
 
       service.setActiveProvider('itunes');
       expect(service.activeProvider.displayName, 'iTunes');
@@ -85,12 +85,12 @@ void main() {
     });
 
     test('getTrending delegates to active provider', () async {
-      final p1 = MockSearchProvider('podcast_index', 'Podcast Index');
+      final p1 = MockSearchProvider('custom_source', 'Custom Directory');
       final service = MultisourceSearchService(initialProvider: p1);
 
       final trending = await service.getTrending();
       expect(trending.length, 1);
-      expect(trending.first.title, 'Trending from Podcast Index');
+      expect(trending.first.title, 'Trending from Custom Directory');
     });
   });
 }

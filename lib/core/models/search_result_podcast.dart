@@ -23,28 +23,6 @@ class SearchResultPodcast {
     required this.providerId,
   });
 
-  factory SearchResultPodcast.fromPodcastIndexJson(Map<String, dynamic> json) {
-    final categoriesMap = json['categories'];
-    List<String> parsedCategories = [];
-    if (categoriesMap is Map) {
-      parsedCategories = categoriesMap.values.map((v) => v.toString()).toList();
-    } else if (categoriesMap is List) {
-      parsedCategories = categoriesMap.map((v) => v.toString()).toList();
-    }
-
-    return SearchResultPodcast(
-      title: (json['title'] ?? 'Untitled Podcast').toString(),
-      author: (json['author'] ?? json['ownerName'] ?? '').toString(),
-      rssUrl: (json['url'] ?? json['originalUrl'] ?? '').toString(),
-      imageUrl: (json['image'] ?? json['artwork'] ?? '').toString(),
-      description: (json['description'] ?? '').toString(),
-      websiteUrl: (json['link'] ?? '').toString(),
-      categories: parsedCategories,
-      episodeCount: (json['episodeCount'] as num?)?.toInt(),
-      language: json['language']?.toString(),
-      providerId: 'podcast_index',
-    );
-  }
 
   Map<String, dynamic> toJson() {
     return {

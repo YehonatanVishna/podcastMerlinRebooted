@@ -41,7 +41,7 @@ class TestPodcastsNotifier extends PodcastsNotifier {
       rssUrl: rssUrl,
       title: 'E2E Discovered Podcast',
       imageUrl: '',
-      description: 'Discovered via Podcast Index',
+      description: 'Discovered podcast',
       link: 'https://example.com',
     );
     _list.add(podcast);
