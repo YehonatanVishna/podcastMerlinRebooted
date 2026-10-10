@@ -44,7 +44,7 @@
     </screenshot>
   </screenshots>
   <releases>
-    <release version="1.0.0" date="2026-10-09">
+    <release version="0.1.0" date="2026-10-10">
       <description>
         <p>Initial release with Nextcloud and gPodder sync, queue management, and Linux desktop integration.</p>
       </description>

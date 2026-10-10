@@ -265,7 +265,7 @@ To build and package into a `.flatpak` bundle without needing `flatpak-builder`:
 
 ```spec
 Name:           podcast-merlin
-Version:        2.0.0
+Version:        0.1.0
 Release:        1%{?dist}
 Summary:        Modern Nextcloud & gPodder podcast sync client
 
@@ -357,7 +357,7 @@ Description: Modern Nextcloud & gPodder podcast sync client
 ```yaml
 name: podcast-merlin
 base: core22
-version: '2.0.0'
+version: '0.1.0'
 summary: Nextcloud & gPodder podcast client
 description: Modern desktop podcast player with Nextcloud & gPodder synchronization.
 confinement: strict
@@ -414,7 +414,7 @@ msix_config:
   display_name: Podcast Merlin
   publisher_display_name: Yehonatan Vishna
   identity_name: YehonatanVishna.PodcastMerlin
-  msix_version: 2.0.0.0
+  msix_version: 0.1.0.0
   logo_path: assets/images/logo_square.png
   capabilities:
     - internetClient
