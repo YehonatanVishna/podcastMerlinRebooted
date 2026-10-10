@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.podcastmerlin.podcast_merlin_flutter</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <name>Podcast Merlin</name>
+  <summary>Modern Nextcloud &amp; gPodder podcast player</summary>
+  <description>
+    <p>
+      Podcast Merlin is a modern, cross-platform podcast client featuring native Nextcloud
+      Podcast and gPodder.net synchronization, designed for Linux, Windows, macOS, and Android.
+    </p>
+    <p>Key highlights:</p>
+    <ul>
+      <li>Bi-directional Nextcloud and gPodder synchronization for podcast subscriptions and episode playback positions</li>
+      <li>Interactive "Up Next" queue with drag-and-drop reordering, swipe removal, and continuous playback</li>
+      <li>Sleep timer with preset durations, real-time countdown, and graceful audio fade-out</li>
+      <li>Variable playback speed (0.5x to 3.0x in 0.1x increments) and customizable skip intervals</li>
+      <li>Search and discover trending podcasts via Apple Podcasts directory</li>
+      <li>Resilient episode downloads with pause, resume, storage quota control, and auto-cleanup policies</li>
+      <li>Native Linux desktop integration with Wayland support, system theme detection, and MPRIS media player keys</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">com.podcastmerlin.podcast_merlin_flutter.desktop</launchable>
+  <url type="homepage">https://github.com/YehonatanVishna/podcastMerlinRebooted</url>
+  <url type="bugtracker">https://github.com/YehonatanVishna/podcastMerlinRebooted/issues</url>
+  <url type="vcs-browser">https://github.com/YehonatanVishna/podcastMerlinRebooted</url>
+  <developer id="com.podcastmerlin">
+    <name>Yehonatan Vishna</name>
+  </developer>
+  <provides>
+    <binary>podcast_merlin_flutter</binary>
+  </provides>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <screenshots>
+    <screenshot type="default">
+      <caption>Podcast Merlin player with Now Playing screen and active queue</caption>
+      <image>https://raw.githubusercontent.com/YehonatanVishna/podcastMerlinRebooted/main/assets/images/logo_512.png</image>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="1.0.0" date="2026-10-09">
+      <description>
+        <p>Initial release with Nextcloud and gPodder sync, queue management, and Linux desktop integration.</p>
+      </description>
+    </release>
+  </releases>
+</component>

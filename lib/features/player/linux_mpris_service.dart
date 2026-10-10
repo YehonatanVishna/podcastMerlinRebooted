@@ -17,7 +17,15 @@ class LinuxMprisService {
       _client = DBusClient.session();
       _dbusObject = _MprisDBusObject(audioHandler);
       await _client!.registerObject(_dbusObject!);
-      await _client!.requestName('org.mpris.MediaPlayer2.podcast_merlin');
+      // Standard Flatpak/Freedesktop MPRIS D-Bus name matching application ID
+      try {
+        await _client!.requestName('org.mpris.MediaPlayer2.com.podcastmerlin.podcast_merlin_flutter');
+      } catch (e) {
+        if (kDebugMode) print('Could not request primary MPRIS name: $e');
+      }
+      try {
+        await _client!.requestName('org.mpris.MediaPlayer2.podcast_merlin');
+      } catch (_) {}
     } catch (e) {
       if (kDebugMode) print('Linux MPRIS initialization error: $e');
     }
@@ -94,7 +102,7 @@ class _MprisDBusObject extends DBusObject {
       'CanRaise': DBusBoolean(true),
       'HasTrackList': DBusBoolean(false),
       'Identity': DBusString('Podcast Merlin'),
-      'DesktopEntry': DBusString('podcast_merlin'),
+      'DesktopEntry': DBusString('com.podcastmerlin.podcast_merlin_flutter'),
       'SupportedUriSchemes': DBusArray.string(['http', 'https', 'file']),
       'SupportedMimeTypes': DBusArray.string(['audio/mpeg', 'audio/x-m4a', 'audio/ogg', 'audio/wav']),
     };

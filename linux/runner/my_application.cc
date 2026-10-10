@@ -29,6 +29,11 @@ static void copy_file_if_exists(const gchar* src, const gchar* dest) {
 
 // Ensures .desktop file and icons exist in ~/.local/share for Wayland compositors (KDE Plasma, GNOME Shell)
 static void ensure_linux_desktop_integration() {
+  // If running inside Flatpak, desktop entries and icons are managed natively by the sandbox
+  if (g_file_test("/.flatpak-info", G_FILE_TEST_EXISTS) || g_getenv("FLATPAK_ID") != nullptr) {
+    return;
+  }
+
   gchar* exe_path = g_file_read_link("/proc/self/exe", nullptr);
   if (exe_path == nullptr) return;
 
@@ -237,32 +242,201 @@ static void set_window_icon(GtkWindow* window) {
   }
 }
 
-// Implements GApplication::activate.
-static void my_application_activate(GApplication* application) {
-  g_set_application_name("Podcast Merlin");
-  g_set_prgname(APPLICATION_ID);
+// Detect whether to use a GNOME-style client-side GtkHeaderBar or traditional
+// window manager title bar (as preferred by KDE Plasma, XFCE, etc.).
+static gboolean should_use_header_bar(GtkWindow* window) {
+  const gchar* current_desktop = g_getenv("XDG_CURRENT_DESKTOP");
+  if (current_desktop != nullptr) {
+    // Non-GNOME desktop environments prefer server-side window manager decorations
+    if (g_strrstr(current_desktop, "KDE") != nullptr ||
+        g_strrstr(current_desktop, "plasma") != nullptr ||
+        g_strrstr(current_desktop, "XFCE") != nullptr ||
+        g_strrstr(current_desktop, "MATE") != nullptr ||
+        g_strrstr(current_desktop, "LXQt") != nullptr ||
+        g_strrstr(current_desktop, "Cinnamon") != nullptr) {
+      return FALSE;
+    }
+    // GNOME Shell uses and expects CSD header bars
+    if (g_strrstr(current_desktop, "GNOME") != nullptr) {
+      return TRUE;
+    }
+  }
 
-  MyApplication* self = MY_APPLICATION(application);
-  GtkWindow* window =
-      GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
-
-  // Use a header bar when running in GNOME as this is the common style used
-  // by applications and is the setup most users will be using (e.g. Ubuntu
-  // desktop).
-  // If running on X and not using GNOME then just use a traditional title bar
-  // in case the window manager does more exotic layout, e.g. tiling.
-  // If running on Wayland assume the header bar will work (may need changing
-  // if future cases occur).
-  gboolean use_header_bar = TRUE;
 #ifdef GDK_WINDOWING_X11
   GdkScreen* screen = gtk_window_get_screen(window);
   if (GDK_IS_X11_SCREEN(screen)) {
     const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
-    if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
-      use_header_bar = FALSE;
+    if (wm_name != nullptr && g_strcmp0(wm_name, "GNOME Shell") != 0) {
+      return FALSE;
     }
   }
 #endif
+
+  // On Wayland (Sway, Hyprland, etc.) or GNOME, assume header bar will work
+  return TRUE;
+}
+
+static guint portal_setting_sub_id = 0;
+static GDBusConnection* portal_dbus_conn = nullptr;
+
+// Callback for XDG portal SettingChanged signal
+static void on_portal_setting_changed(GDBusConnection* connection,
+                                      const gchar* sender_name,
+                                      const gchar* object_path,
+                                      const gchar* interface_name,
+                                      const gchar* signal_name,
+                                      GVariant* parameters,
+                                      gpointer user_data) {
+  if (parameters == nullptr || !g_variant_is_of_type(parameters, G_VARIANT_TYPE("(ssv)"))) {
+    return;
+  }
+
+  const gchar* namespace_str = nullptr;
+  const gchar* key_str = nullptr;
+  g_autoptr(GVariant) value = nullptr;
+
+  g_variant_get(parameters, "(&s&sv)", &namespace_str, &key_str, &value);
+  if (namespace_str != nullptr && g_strcmp0(namespace_str, "org.freedesktop.appearance") == 0 &&
+      key_str != nullptr && g_strcmp0(key_str, "color-scheme") == 0 && value != nullptr) {
+    guint32 scheme = 0;
+    if (g_variant_is_of_type(value, G_VARIANT_TYPE_VARIANT)) {
+      g_autoptr(GVariant) inner = g_variant_get_variant(value);
+      if (g_variant_is_of_type(inner, G_VARIANT_TYPE_UINT32)) {
+        scheme = g_variant_get_uint32(inner);
+      }
+    } else if (g_variant_is_of_type(value, G_VARIANT_TYPE_UINT32)) {
+      scheme = g_variant_get_uint32(value);
+    }
+
+    // scheme: 0 = no preference (preserve system default), 1 = prefer dark, 2 = prefer light
+    if (scheme == 1 || scheme == 2) {
+      GtkSettings* settings = gtk_settings_get_default();
+      if (settings != nullptr) {
+        gboolean prefer_dark = (scheme == 1);
+        g_object_set(settings, "gtk-application-prefer-dark-theme", prefer_dark, nullptr);
+      }
+    }
+  }
+}
+
+// Synchronize GTK theme preference (dark/light) with the desktop environment (KDE, GNOME, etc.)
+static void sync_gtk_theme_mode() {
+  GtkSettings* settings = gtk_settings_get_default();
+  if (settings == nullptr) return;
+
+  gboolean dark_detected = FALSE;
+  gboolean setting_determined = FALSE;
+
+  // 1. Query XDG Desktop Portal for appearance color-scheme
+  g_autoptr(GError) error = nullptr;
+  g_autoptr(GDBusConnection) connection = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &error);
+  if (connection != nullptr) {
+    g_autoptr(GVariant) result = g_dbus_connection_call_sync(
+        connection,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.Settings",
+        "Read",
+        g_variant_new("(ss)", "org.freedesktop.appearance", "color-scheme"),
+        G_VARIANT_TYPE("(v)"),
+        G_DBUS_CALL_FLAGS_NONE,
+        150, // Short timeout (150ms) to prevent freezing main thread on cold launch
+        nullptr,
+        nullptr);
+
+    if (result != nullptr) {
+      g_autoptr(GVariant) tuple_val = nullptr;
+      g_variant_get(result, "(v)", &tuple_val);
+      if (tuple_val != nullptr) {
+        g_autoptr(GVariant) inner_val = g_variant_get_variant(tuple_val);
+        if (inner_val != nullptr) {
+          guint32 scheme = 0;
+          if (g_variant_is_of_type(inner_val, G_VARIANT_TYPE_VARIANT)) {
+            g_autoptr(GVariant) u_val = g_variant_get_variant(inner_val);
+            if (g_variant_is_of_type(u_val, G_VARIANT_TYPE_UINT32)) {
+              scheme = g_variant_get_uint32(u_val);
+            }
+          } else if (g_variant_is_of_type(inner_val, G_VARIANT_TYPE_UINT32)) {
+            scheme = g_variant_get_uint32(inner_val);
+          }
+
+          if (scheme == 1) { // Prefer dark
+            dark_detected = TRUE;
+            setting_determined = TRUE;
+          } else if (scheme == 2) { // Prefer light
+            dark_detected = FALSE;
+            setting_determined = TRUE;
+          }
+        }
+      }
+    }
+
+    // Subscribe to portal SettingChanged signal for live theme toggling
+    if (portal_setting_sub_id == 0) {
+      portal_dbus_conn = G_DBUS_CONNECTION(g_object_ref(connection));
+      portal_setting_sub_id = g_dbus_connection_signal_subscribe(
+          connection,
+          "org.freedesktop.portal.Desktop",
+          "org.freedesktop.portal.Settings",
+          "SettingChanged",
+          "/org/freedesktop/portal/desktop",
+          nullptr,
+          G_DBUS_SIGNAL_FLAGS_NONE,
+          on_portal_setting_changed,
+          nullptr,
+          nullptr);
+    }
+  }
+
+  // 2. If not determined by portal, check GTK 3 settings.ini and KDE kdeglobals
+  if (!setting_determined) {
+    const gchar* config_dir = g_get_user_config_dir();
+    if (config_dir != nullptr) {
+      gchar* gtk_ini = g_build_filename(config_dir, "gtk-3.0", "settings.ini", nullptr);
+      if (g_file_test(gtk_ini, G_FILE_TEST_EXISTS)) {
+        g_autoptr(GKeyFile) kf = g_key_file_new();
+        if (g_key_file_load_from_file(kf, gtk_ini, G_KEY_FILE_NONE, nullptr)) {
+          if (g_key_file_has_key(kf, "Settings", "gtk-application-prefer-dark-theme", nullptr)) {
+            dark_detected = g_key_file_get_boolean(kf, "Settings", "gtk-application-prefer-dark-theme", nullptr);
+            setting_determined = TRUE;
+          }
+        }
+      }
+      g_free(gtk_ini);
+
+      if (!setting_determined) {
+        gchar* kde_ini = g_build_filename(config_dir, "kdeglobals", nullptr);
+        if (g_file_test(kde_ini, G_FILE_TEST_EXISTS)) {
+          g_autoptr(GKeyFile) kf = g_key_file_new();
+          if (g_key_file_load_from_file(kf, kde_ini, G_KEY_FILE_NONE, nullptr)) {
+            gchar* color_scheme = g_key_file_get_string(kf, "General", "ColorScheme", nullptr);
+            if (color_scheme != nullptr) {
+              dark_detected = (g_strrstr(color_scheme, "Dark") != nullptr || g_strrstr(color_scheme, "Black") != nullptr);
+              setting_determined = TRUE;
+              g_free(color_scheme);
+            }
+          }
+        }
+        g_free(kde_ini);
+      }
+    }
+  }
+
+  if (setting_determined) {
+    g_object_set(settings, "gtk-application-prefer-dark-theme", dark_detected, nullptr);
+  }
+}
+
+// Implements GApplication::activate.
+static void my_application_activate(GApplication* application) {
+  MyApplication* self = MY_APPLICATION(application);
+  GtkWindow* window =
+      GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+
+  // Use a GNOME header bar only when running in GNOME.
+  // For KDE Plasma and other desktop environments, let the window manager
+  // draw native window decorations (SSD) matching the system theme and button layout.
+  gboolean use_header_bar = should_use_header_bar(window);
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
@@ -328,14 +502,18 @@ static void my_application_startup(GApplication* application) {
   g_set_prgname(APPLICATION_ID);
   g_set_application_name("Podcast Merlin");
 
+  sync_gtk_theme_mode();
+
   G_APPLICATION_CLASS(my_application_parent_class)->startup(application);
 }
 
 // Implements GApplication::shutdown.
 static void my_application_shutdown(GApplication* application) {
-  // MyApplication* self = MY_APPLICATION(object);
-
-  // Perform any actions required at application shutdown.
+  if (portal_dbus_conn != nullptr && portal_setting_sub_id != 0) {
+    g_dbus_connection_signal_unsubscribe(portal_dbus_conn, portal_setting_sub_id);
+    portal_setting_sub_id = 0;
+    g_clear_object(&portal_dbus_conn);
+  }
 
   G_APPLICATION_CLASS(my_application_parent_class)->shutdown(application);
 }

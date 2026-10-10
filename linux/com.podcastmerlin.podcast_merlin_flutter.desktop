@@ -8,4 +8,6 @@ Exec=podcast_merlin_flutter %U
 Icon=com.podcastmerlin.podcast_merlin_flutter
 Terminal=false
 Categories=AudioVideo;Audio;Player;
+Keywords=podcast;audio;rss;nextcloud;gpodder;player;
+MimeType=x-scheme-handler/podcast;x-scheme-handler/pcast;application/rss+xml;
 StartupWMClass=com.podcastmerlin.podcast_merlin_flutter
