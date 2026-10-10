@@ -32,8 +32,6 @@ finish-args:
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.freedesktop.portal.Desktop
   - --own-name=org.mpris.MediaPlayer2.com.podcastmerlin.podcast_merlin_flutter
-  - --own-name=org.mpris.MediaPlayer2.podcast_merlin
-  - --own-name=org.mpris.MediaPlayer2.podcast_merlin.*
 
   # User directory access for downloaded episodes
   - --filesystem=xdg-download

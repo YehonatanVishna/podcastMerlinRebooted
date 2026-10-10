@@ -424,6 +424,15 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       },
       onError: (Object e, StackTrace st) {
         if (kDebugMode) print('PlaybackEventStream error: $e');
+        final errorState = playbackState.value.copyWith(
+          processingState: AudioProcessingState.idle,
+          playing: false,
+        );
+        playbackState.add(errorState);
+        LinuxMprisService.instance.updateState(errorState, mediaItem.value);
+        if (!_playbackErrorController.isClosed) {
+          _playbackErrorController.add('Playback connection error: $e');
+        }
       },
     );
 

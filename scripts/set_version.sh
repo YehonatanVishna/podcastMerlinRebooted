@@ -121,7 +121,7 @@ SEMVER="$TARGET_VERSION"
 BUILD_NUM="$TARGET_BUILD"
 FULL_FLUTTER_VERSION="${SEMVER}+${BUILD_NUM}"
 MSIX_VERSION="${MAJOR}.${MINOR}.${PATCH}.0"
-RC_VERSION_NUMBER="${MAJOR},${MINOR},${PATCH},0"
+RC_VERSION_NUMBER="${MAJOR},${MINOR},${PATCH},${BUILD_NUM}"
 RELEASE_DATE="$(date +%Y-%m-%d)"
 
 echo "==> Setting project version:"
@@ -281,6 +281,13 @@ with open(file_path, 'r', encoding='utf-8') as f:
 content = re.sub(
     r'(MARKETING_VERSION\s*=\s*)[0-9.]+;',
     rf'\g<1>${SEMVER};',
+    content
+)
+
+# Replace CURRENT_PROJECT_VERSION
+content = re.sub(
+    r'(CURRENT_PROJECT_VERSION\s*=\s*)[0-9]+;',
+    rf'\g<1>${BUILD_NUM};',
     content
 )
 

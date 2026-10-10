@@ -6,7 +6,26 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 class SecureStorageService {
-  static const _secureStorage = FlutterSecureStorage();
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(resetOnError: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+    mOptions: MacOsOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
+
+  static bool _fallbackStorageUsed = false;
+  static bool get fallbackStorageUsed => _fallbackStorageUsed;
+
+  /// Checks if hardware/OS secure storage is functional without throwing.
+  Future<bool> probeSecureStorageAvailable() async {
+    try {
+      await _secureStorage.write(key: '__probe_key__', value: '1');
+      await _secureStorage.delete(key: '__probe_key__');
+      return true;
+    } catch (_) {
+      _fallbackStorageUsed = true;
+      return false;
+    }
+  }
 
   static const String keyServerUrl = 'nextcloud_server_url';
   static const String keyUsername = 'nextcloud_username';
@@ -25,6 +44,7 @@ class SecureStorageService {
       _memoryFallback[key] = value;
       await _deleteFallback(key);
     } catch (e) {
+      _fallbackStorageUsed = true;
       if (kDebugMode) print('SecureStorage write error, using fallback: $e');
       await _writeFallback(key, value);
     }

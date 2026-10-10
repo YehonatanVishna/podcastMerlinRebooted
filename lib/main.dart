@@ -34,6 +34,7 @@ void main() async {
 
   // Platform-safe FFI setup (noop on Web, sqflite_ffi on Desktop/Mobile)
   setupFfi();
+  _registerNativeLicenses();
   try {
     MediaKit.ensureInitialized();
   } catch (e) {
@@ -48,7 +49,7 @@ void main() async {
       androidNotificationChannelId: 'com.podcastmerlin.audio',
       androidNotificationChannelName: 'Podcast Merlin Playback',
       androidNotificationOngoing: false,
-      androidStopForegroundOnPause: true,
+      androidStopForegroundOnPause: false,
       androidNotificationClickStartsActivity: true,
       androidNotificationIcon: 'drawable/ic_stat_podcast',
       androidShowNotificationBadge: true,
@@ -180,4 +181,30 @@ class PodcastMerlinApp extends ConsumerWidget {
       },
     );
   }
+}
+
+void _registerNativeLicenses() {
+  LicenseRegistry.addLicense(() async* {
+    yield const LicenseEntryWithLineBreaks(
+      ['libmpv', 'mpv-player'],
+      '''Copyright © mpv developers
+Licensed under GNU General Public License v2.0 or later (with LGPL parts).
+Upstream source code available at https://github.com/mpv-player/mpv
+Windows runtime builds: https://github.com/media-kit/libmpv-win32-video-build''',
+    );
+    yield const LicenseEntryWithLineBreaks(
+      ['libsecret'],
+      '''Copyright © GNOME Foundation
+Licensed under GNU Lesser General Public License v2.1 or later.''',
+    );
+    yield const LicenseEntryWithLineBreaks(
+      ['sqlite3'],
+      '''SQLite is in the Public Domain (dedicated to the public domain by D. Richard Hipp).''',
+    );
+    yield const LicenseEntryWithLineBreaks(
+      ['ANGLE (Google / Chromium)'],
+      '''Copyright 2018 The ANGLE Project Authors.
+Licensed under BSD 3-Clause License.''',
+    );
+  });
 }

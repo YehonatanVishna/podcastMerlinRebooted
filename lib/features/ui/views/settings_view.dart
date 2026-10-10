@@ -7,6 +7,7 @@ import '../../sync/opml_ui_helper.dart';
 import '../../sync/secure_storage_service.dart';
 import '../widgets/dopamine_switcher_sheet.dart';
 import '../widgets/sync_error_banner.dart';
+import '../../../core/services/url_launcher_service.dart';
 import '../../../main.dart';
 
 class SettingsView extends ConsumerStatefulWidget {
@@ -81,11 +82,83 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     super.dispose();
   }
 
-  Future<void> _saveNextcloudCredentials() async {
+  Future<bool> _confirmInsecureHttp(BuildContext context) async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('Security Warning: HTTP'),
+          ],
+        ),
+        content: const Text(
+          'You have entered an unencrypted (HTTP) server address.\n\n'
+          'Your Nextcloud/gPodder username and password will be transmitted across your network in cleartext without SSL/TLS encryption. Anyone on your local Wi-Fi or network path could intercept them.\n\n'
+          'It is strongly recommended to use HTTPS. Do you wish to proceed anyway?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Proceed Anyway'),
+          ),
+        ],
+      ),
+    ) ?? false;
+  }
+
+  Future<bool> _confirmFallbackStorage(BuildContext context) async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.security, color: Colors.amber),
+            SizedBox(width: 8),
+            Text('Keyring Notice'),
+          ],
+        ),
+        content: const Text(
+          'Hardware/OS secure keyring is unavailable in this environment.\n\n'
+          'Your credentials will be stored in local application support files without hardware encryption. On multi-user systems, other local accounts with file access could read this data.\n\n'
+          'Do you wish to proceed with saving credentials?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Save Anyway'),
+          ),
+        ],
+      ),
+    ) ?? false;
+  }
+
+  Future<bool> _saveNextcloudCredentials() async {
+    final newServer = _serverController.text.trim();
+    if (newServer.isNotEmpty && newServer.toLowerCase().startsWith('http://')) {
+      final proceed = await _confirmInsecureHttp(context);
+      if (!proceed || !mounted) return false;
+    }
+
     final storage = ref.read(secureStorageProvider);
+    final isSecureAvailable = await storage.probeSecureStorageAvailable();
+    if (!mounted) return false;
+    if (!isSecureAvailable) {
+      final proceed = await _confirmFallbackStorage(context);
+      if (!proceed || !mounted) return false;
+    }
+
     final oldServer = await storage.read(SecureStorageService.keyServerUrl) ?? '';
     final oldUser = await storage.read(SecureStorageService.keyUsername) ?? '';
-    final newServer = _serverController.text.trim();
     final newUser = _userController.text.trim();
 
     if (oldServer != newServer || oldUser != newUser) {
@@ -102,6 +175,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
         const SnackBar(content: Text('Nextcloud credentials saved')),
       );
     }
+    return true;
   }
 
   Future<bool> _saveDeviceId() async {
@@ -127,7 +201,8 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   }
 
   Future<void> _saveCredentials() async {
-    await _saveNextcloudCredentials();
+    final credentialsSaved = await _saveNextcloudCredentials();
+    if (!credentialsSaved) return;
     final deviceIdSaved = await _saveDeviceId();
     if (!deviceIdSaved) return;
     if (mounted) {
@@ -138,6 +213,12 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   }
 
   Future<void> _testConnection() async {
+    final serverUrl = _serverController.text.trim();
+    if (serverUrl.isNotEmpty && serverUrl.toLowerCase().startsWith('http://')) {
+      final proceed = await _confirmInsecureHttp(context);
+      if (!proceed) return;
+    }
+
     setState(() {
       _isTesting = true;
       _statusMessage = null;
@@ -218,7 +299,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Configurable Podcast Client • v2.0.0',
+                        'Configurable Podcast Client • v0.1.0',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               color: Theme.of(context)
                                   .textTheme
@@ -1241,7 +1322,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          'Import subscriptions from or export them to an OPML 2.0 file, compatible with antennaPod, Pocket Casts, and Apple Podcasts.',
+                          'Import subscriptions from or export them to a standard OPML 2.0 file, compatible with any podcast app.',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                               ),
@@ -1285,6 +1366,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 24),
+                _buildSectionHeader('About & Legal Notices', Icons.info_outline),
+                _buildAboutAndLegalCard(context),
                 const SizedBox(height: 40),
               ],
             ),
@@ -1459,5 +1543,108 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
         if (mounted) setState(() => _isClearingDownloads = false);
       }
     }
+  }
+
+  Widget _buildAboutAndLegalCard(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: theme.dividerColor),
+      ),
+      child: Column(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.source_outlined),
+            title: const Text('Source Code (AGPL-3.0)'),
+            subtitle: const Text('https://github.com/YehonatanVishna/podcastMerlinRebooted'),
+            trailing: const Icon(Icons.open_in_new, size: 18),
+            onTap: () => UrlLauncherService.launchWebUrl(
+              'https://github.com/YehonatanVishna/podcastMerlinRebooted',
+              context: context,
+            ),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.description_outlined),
+            title: const Text('Open Source Licenses'),
+            subtitle: const Text('Third-party dependencies, native libraries & copyright notices'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              showLicensePage(
+                context: context,
+                applicationName: 'Podcast Merlin',
+                applicationVersion: '0.1.0',
+                applicationLegalese: 'Copyright © 2026 Yehonatan Vishna\nLicensed under AGPL-3.0-or-later with digital distribution exception.',
+              );
+            },
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.verified_outlined),
+            title: const Text('Trademark Notices & Disclaimers'),
+            subtitle: const Text('Information regarding third-party service marks'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showTrademarkDialog(context),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.privacy_tip_outlined),
+            title: const Text('Privacy & Data Governance'),
+            subtitle: const Text('Local-first storage, sync credentials, and external directory usage'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showPrivacyDialog(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTrademarkDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Trademark Notices & Disclaimers'),
+        content: const SingleChildScrollView(
+          child: Text(
+            '• Apple, Apple Podcasts, and iTunes are trademarks of Apple Inc., registered in the U.S. and other countries. Podcast Merlin interfaces with the public iTunes Search API for catalog discovery and is not endorsed or certified by Apple Inc.\n\n'
+            '• Nextcloud is a registered trademark of Nextcloud GmbH in the United States and/or other countries. Podcast Merlin is an independent client and is not affiliated with or sponsored by Nextcloud GmbH.\n\n'
+            '• gPodder and gPodder.net are maintained by the gPodder open-source community.\n\n'
+            '• All other trademarks belong to their respective owners.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPrivacyDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Privacy & Data Governance'),
+        content: const SingleChildScrollView(
+          child: Text(
+            'Podcast Merlin is designed as a local-first, privacy-respecting application:\n\n'
+            '1. Local Data Storage: All podcast subscriptions, listening positions, and downloaded audio files are stored locally on your device.\n\n'
+            '2. Sync Services: If configured, Nextcloud and gPodder.net synchronization sends playback positions and subscription states directly to your designated server over secure connections. No analytics, tracking pixels, or telemetry are collected or transmitted by Podcast Merlin.\n\n'
+            '3. Discovery Searches: Podcast directory queries in the Discovery view are sent directly to the public Apple Podcasts / iTunes API.\n\n'
+            '4. Credential Security: Passwords and tokens are stored in your operating system\'s secure keychain/keyring (with user-notified local fallback where unavailable).',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 }

@@ -30,16 +30,21 @@ being bound or restricted by the terms of the GNU Affero General Public License.
 ADDITIONAL PERMISSION UNDER GNU AGPL VERSION 3 SECTION 7
 ========================================================================
 
-If you modify this Program, or any covered work, by linking or combining it 
-with libraries or services required for distribution through digital application 
-stores (including without limitation the Apple App Store, Google Play Store, and 
-Microsoft Store), you are granted permission to convey the resulting work under 
-the terms of those distribution platforms, provided that:
+Permission is hereby granted to convey this Program, or any covered work 
+(whether unmodified or modified), by linking or combining it with libraries, 
+SDKs, or services required for distribution through digital application 
+stores (including without limitation the Apple App Store, Google Play Store, 
+and Microsoft Store), and to convey the resulting work under the terms of 
+those distribution platforms, provided that:
 
-1. The Corresponding Source for the work is made publicly available under 
-   the terms of the GNU Affero General Public License version 3 (or later); and
-2. The copyright notice and this permission notice are included with any 
-   distribution of the work.
+1. The Corresponding Source for the Program authored by Yehonatan Vishna 
+   is made publicly available under the terms of the GNU Affero General 
+   Public License version 3 (or later); and
+2. All copyright notices, third-party attribution notices, and this 
+   permission notice are included with every distribution of the work.
+
+Nothing in this notice shall be construed to waive or diminish the copyleft 
+licensing terms of third-party libraries combined with this Program.
 
 ========================================================================
 GNU AFFERO GENERAL PUBLIC LICENSE (Version 3, 19 November 2007)

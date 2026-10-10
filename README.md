@@ -104,3 +104,12 @@ This project is licensed under the **GNU Affero General Public License v3.0 (or 
 
 ### Dual-Licensing & App Store Distribution Notice
 The author and sole copyright holder, **Yehonatan Vishna**, reserves the unrestricted right to convey, compile, and distribute binary and source releases of this application through digital application stores (including the Apple App Store, Google Play Store, and Microsoft Store) under alternative distribution terms, commercial terms, or the Apple Standard EULA, without being bound or restricted by the terms of the GNU Affero General Public License.
+
+---
+
+## Trademark Notices & Disclaimers
+
+- **Apple, Apple Podcasts, and iTunes** are trademarks of Apple Inc., registered in the U.S. and other countries. Podcast Merlin interfaces with the public iTunes Search API for catalog discovery and is not endorsed or certified by Apple Inc.
+- **Nextcloud** is a registered trademark of Nextcloud GmbH in the United States and/or other countries. Podcast Merlin is an independent client and is not affiliated with or sponsored by Nextcloud GmbH.
+- **gPodder and gPodder.net** are maintained by the gPodder open-source community.
+- All other trademarks belong to their respective owners.
