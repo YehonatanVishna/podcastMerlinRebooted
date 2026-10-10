@@ -51,7 +51,19 @@ sudo pacman -S --needed mpv libsecret gtk3 sqlite
 sudo zypper install -y libmpv2 libsecret-1-0 libgtk-3-0 libsqlite3-0
 ```
 
-> 📖 **Full Packaging Guide**: For Flatpak manifests, RPM spec files, Debian control files, Snapcraft configs, and AppImage bundling, see [docs/SYSTEM_DEPENDENCIES.md](docs/SYSTEM_DEPENDENCIES.md).
+#### Flatpak Packaging
+```bash
+# Build standalone Flatpak bundle (build/podcast_merlin.flatpak)
+./scripts/build_flatpak.sh
+
+# Build and install to local user
+./scripts/build_flatpak.sh --install
+
+# Run installed Flatpak
+flatpak run com.podcastmerlin.podcast_merlin_flutter
+```
+
+> 📖 **Full Packaging Guide**: For Flatpak manifests, RPM spec files, Debian control files, Snapcraft configs, and AppImage bundling, see [docs/SYSTEM_DEPENDENCIES.md](docs/SYSTEM_DEPENDENCIES.md) and [flatpak/README.md](flatpak/README.md).
 
 ---
 

@@ -46,10 +46,6 @@ function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")
 endfunction()
 
-set(ENV{PKG_CONFIG_PATH} "/home/yehonatanv/pkgconfig:$ENV{PKG_CONFIG_PATH}")
-include_directories(/home/yehonatanv/pkgconfig)
-link_directories(/home/yehonatanv/pkgconfig)
-
 # Flutter library and tool build rules.
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
@@ -131,13 +127,42 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
     COMPONENT Runtime)
 endif()
 
-# Install desktop file and icons for Linux desktop integration
+# Install desktop file, metainfo, and icons for Linux desktop integration
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/com.podcastmerlin.podcast_merlin_flutter.desktop"
   DESTINATION "${CMAKE_INSTALL_PREFIX}/share/applications"
   COMPONENT Runtime)
 
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/images/logo.png"
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/com.podcastmerlin.podcast_merlin_flutter.metainfo.xml"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/share/metainfo"
+  COMPONENT Runtime)
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/images/logo_512.png"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/share/icons/hicolor/512x512/apps"
+  RENAME "${APPLICATION_ID}.png"
+  COMPONENT Runtime)
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/images/logo_256.png"
   DESTINATION "${CMAKE_INSTALL_PREFIX}/share/icons/hicolor/256x256/apps"
+  RENAME "${APPLICATION_ID}.png"
+  COMPONENT Runtime)
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/images/logo_128.png"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/share/icons/hicolor/128x128/apps"
+  RENAME "${APPLICATION_ID}.png"
+  COMPONENT Runtime)
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/images/logo_64.png"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/share/icons/hicolor/64x64/apps"
+  RENAME "${APPLICATION_ID}.png"
+  COMPONENT Runtime)
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/images/logo_32.png"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/share/icons/hicolor/32x32/apps"
+  RENAME "${APPLICATION_ID}.png"
+  COMPONENT Runtime)
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/images/logo_16.png"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/share/icons/hicolor/16x16/apps"
   RENAME "${APPLICATION_ID}.png"
   COMPONENT Runtime)
 
@@ -146,7 +171,7 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/images/logo.svg"
   RENAME "${APPLICATION_ID}.svg"
   COMPONENT Runtime)
 
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/images/logo.png"
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/images/logo_256.png"
   DESTINATION "${CMAKE_INSTALL_PREFIX}/share/pixmaps"
   RENAME "${APPLICATION_ID}.png"
   COMPONENT Runtime)

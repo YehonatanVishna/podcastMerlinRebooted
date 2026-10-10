@@ -152,19 +152,19 @@ sudo zypper install -y \
 
 ## 3. Linux Packaging Reference Manifests
 
-### 3.1 Flatpak (`com.podcastmerlin.PodcastMerlin.yaml`)
+### 3.1 Flatpak (`com.podcastmerlin.podcast_merlin_flutter.yaml`)
 
-Flatpak sandboxing requires specific permissions for audio playback (PulseAudio/PipeWire), network access (RSS & audio streaming), password storage (FreeDesktop Secret Service), and MPRIS media key controls:
+Flatpak sandboxing requires specific permissions for audio playback (PulseAudio/PipeWire), network access (RSS & audio streaming), password storage (FreeDesktop Secret Service), notifications, and MPRIS media key controls:
 
 ```yaml
-app-id: com.podcastmerlin.PodcastMerlin
-runtime: org.freedesktop.Platform
-runtime-version: '23.08'
-sdk: org.freedesktop.Sdk
+app-id: com.podcastmerlin.podcast_merlin_flutter
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
 command: podcast_merlin_flutter
 
 finish-args:
-  # Display & Windowing
+  # Display & GPU acceleration
   - --socket=wayland
   - --socket=fallback-x11
   - --share=ipc
@@ -176,33 +176,87 @@ finish-args:
   # Network (fetching RSS, podcast audio streaming, gPodder/Nextcloud API)
   - --share=network
 
-  # Secret Service (storing Nextcloud password via libsecret)
+  # Secret Service (storing Nextcloud / gPodder passwords and tokens securely via libsecret)
   - --talk-name=org.freedesktop.secrets
 
+  # Desktop Notifications
+  - --talk-name=org.freedesktop.Notifications
+
   # MPRIS (Desktop media player widget and hardware media keys)
-  - --own-name=org.mpris.MediaPlayer2.podcastmerlin
-  - --own-name=org.mpris.MediaPlayer2.podcast_merlin_flutter
+  - --own-name=org.mpris.MediaPlayer2.com.podcastmerlin.podcast_merlin_flutter
+  - --own-name=org.mpris.MediaPlayer2.podcast_merlin
+  - --own-name=org.mpris.MediaPlayer2.podcast_merlin.*
+
+  # User directory access for downloaded episodes
+  - --filesystem=xdg-download
+
+  # Desktop Environment & Theme Integration (KDE Plasma & GNOME)
+  - --filesystem=xdg-config/kdeglobals:ro
+  - --filesystem=xdg-config/gtk-3.0:ro
+  - --filesystem=xdg-config/gtk-4.0:ro
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=org.freedesktop.portal.Desktop
+
+add-extensions:
+  org.freedesktop.Platform.ffmpeg-full:
+    version: '25.08'
+    directory: lib/ffmpeg
+    add-ld-path: .
+
+cleanup-commands:
+  - mkdir -p ${FLATPAK_DEST}/lib/ffmpeg
 
 modules:
-  - name: mpv
+  - name: libmpv
+    cleanup:
+      - /share/bash-completion
+      - /share/zsh
+      - /share/doc
+      - /share/icons
+      - /share/applications
     buildsystem: meson
     config-opts:
       - -Dlibmpv=true
       - -Dcplayer=false
+      - -Dlua=disabled
+      - -Ddebug=false
+      - -Dbuild-date=false
+      - -Dalsa=disabled
+      - -Dmanpage-build=disabled
+      - -Dvulkan=enabled
     sources:
       - type: archive
-        url: https://github.com/mpv-player/mpv/archive/v0.37.0.tar.gz
-        sha256: 1d2d4adbaf048a2ef6ec13ca1d14ff4b6bd2d8e7c9ea9f6c9497778073e1a941
+        url: https://github.com/mpv-player/mpv/archive/refs/tags/v0.38.0.tar.gz
+        sha256: 86d9ef40b6058732f67b46d0bbda24a074fae860b3eaae05bab3145041303066
 
   - name: podcast-merlin
     buildsystem: simple
     build-commands:
-      - install -D -m 755 podcast_merlin_flutter /app/bin/podcast_merlin_flutter
-      - cp -r data /app/bin/
-      - cp -r lib /app/bin/
-      - install -D -m 644 assets/images/logo.png /app/share/icons/hicolor/512x512/apps/com.podcastmerlin.PodcastMerlin.png
-      - install -D -m 644 com.podcastmerlin.PodcastMerlin.desktop /app/share/applications/com.podcastmerlin.PodcastMerlin.desktop
-      - install -D -m 644 com.podcastmerlin.PodcastMerlin.metainfo.xml /app/share/metainfo/com.podcastmerlin.PodcastMerlin.metainfo.xml
+      - install -dm755 /app/bin /app/podcast_merlin_flutter
+      - cp -a * /app/podcast_merlin_flutter/
+      - ln -sf /app/podcast_merlin_flutter/podcast_merlin_flutter /app/bin/podcast_merlin_flutter
+      - install -Dm644 share/applications/com.podcastmerlin.podcast_merlin_flutter.desktop /app/share/applications/com.podcastmerlin.podcast_merlin_flutter.desktop
+      - install -Dm644 share/metainfo/com.podcastmerlin.podcast_merlin_flutter.metainfo.xml /app/share/metainfo/com.podcastmerlin.podcast_merlin_flutter.metainfo.xml
+      - install -Dm644 share/icons/hicolor/512x512/apps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/icons/hicolor/512x512/apps/com.podcastmerlin.podcast_merlin_flutter.png
+      - install -Dm644 share/icons/hicolor/256x256/apps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/icons/hicolor/256x256/apps/com.podcastmerlin.podcast_merlin_flutter.png
+      - install -Dm644 share/icons/hicolor/128x128/apps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/icons/hicolor/128x128/apps/com.podcastmerlin.podcast_merlin_flutter.png
+      - install -Dm644 share/icons/hicolor/64x64/apps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/icons/hicolor/64x64/apps/com.podcastmerlin.podcast_merlin_flutter.png
+      - install -Dm644 share/icons/hicolor/32x32/apps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/icons/hicolor/32x32/apps/com.podcastmerlin.podcast_merlin_flutter.png
+      - install -Dm644 share/icons/hicolor/16x16/apps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/icons/hicolor/16x16/apps/com.podcastmerlin.podcast_merlin_flutter.png
+      - install -Dm644 share/icons/hicolor/scalable/apps/com.podcastmerlin.podcast_merlin_flutter.svg /app/share/icons/hicolor/scalable/apps/com.podcastmerlin.podcast_merlin_flutter.svg
+      - install -Dm644 share/pixmaps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/pixmaps/com.podcastmerlin.podcast_merlin_flutter.png
+    sources:
+      - type: dir
+        path: build/linux/x64/release/bundle
+```
+
+#### Quick Build with `./scripts/build_flatpak.sh`
+
+To build and package into a `.flatpak` bundle without needing `flatpak-builder`:
+```bash
+./scripts/build_flatpak.sh
+# To automatically install locally:
+./scripts/build_flatpak.sh --install
 ```
 
 ---

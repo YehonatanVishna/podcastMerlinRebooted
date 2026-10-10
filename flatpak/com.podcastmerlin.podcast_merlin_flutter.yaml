@@ -1,0 +1,137 @@
+app-id: com.podcastmerlin.podcast_merlin_flutter
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: podcast_merlin_flutter
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/doc
+  - /share/man
+  - '*.la'
+  - '*.a'
+
+finish-args:
+  # Display & GPU acceleration
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+
+  # Audio playback (PulseAudio / PipeWire)
+  - --socket=pulseaudio
+
+  # Network (fetching RSS, podcast audio streaming, gPodder/Nextcloud API)
+  - --share=network
+
+  # Secret Service (storing Nextcloud / gPodder passwords and tokens securely via libsecret)
+  - --talk-name=org.freedesktop.secrets
+
+  # Desktop Notifications & MPRIS Media Player
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.freedesktop.portal.Desktop
+  - --own-name=org.mpris.MediaPlayer2.com.podcastmerlin.podcast_merlin_flutter
+  - --own-name=org.mpris.MediaPlayer2.podcast_merlin
+  - --own-name=org.mpris.MediaPlayer2.podcast_merlin.*
+
+  # User directory access for downloaded episodes
+  - --filesystem=xdg-download
+
+  # Desktop Environment & Theme Integration (KDE Plasma & GNOME)
+  - --filesystem=xdg-config/kdeglobals:ro
+  - --filesystem=xdg-config/gtk-3.0:ro
+  - --filesystem=xdg-config/gtk-4.0:ro
+  - --talk-name=org.kde.StatusNotifierWatcher
+
+add-extensions:
+  org.freedesktop.Platform.ffmpeg-full:
+    version: '25.08'
+    directory: lib/ffmpeg
+    add-ld-path: .
+
+cleanup-commands:
+  - mkdir -p ${FLATPAK_DEST}/lib/ffmpeg
+
+modules:
+  - name: libmpv
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/bash-completion
+      - /share/zsh
+      - /share/doc
+      - /share/icons
+      - /share/applications
+    buildsystem: meson
+    config-opts:
+      - -Dlibmpv=true
+      - -Dcplayer=false
+      - -Dlua=disabled
+      - -Ddebug=false
+      - -Dbuild-date=false
+      - -Dalsa=disabled
+      - -Dmanpage-build=disabled
+      - -Dvulkan=enabled
+    sources:
+      - type: archive
+        url: https://github.com/mpv-player/mpv/archive/refs/tags/v0.40.0.tar.gz
+        sha256: 10a0f4654f62140a6dd4d380dcf0bbdbdcf6e697556863dc499c296182f081a3
+    modules:
+      - name: libplacebo
+        cleanup:
+          - /include
+          - /lib/pkgconfig
+        buildsystem: meson
+        config-opts:
+          - -Dopengl=enabled
+          - -Dvulkan=enabled
+          - -Dglslang=disabled
+          - -Dd3d11=disabled
+          - -Ddemos=False
+        sources:
+          - type: archive
+            url: https://code.videolan.org/videolan/libplacebo/-/archive/v7.360.1/libplacebo-v7.360.1.tar.gz
+            sha256: 14c0a99f4b01557ec9826ce6b1d52f6de21be274ba03fd5aab7307f18766dc39
+          - type: archive
+            url: https://github.com/pallets/jinja/archive/refs/tags/3.1.6.tar.gz
+            sha256: 2074b22a72caa65474902234b320d73463d6d4c223ee49f4b433495758356337
+            dest: 3rdparty/jinja
+          - type: archive
+            url: https://github.com/Dav1dde/glad/archive/refs/tags/v2.0.8.tar.gz
+            sha256: 44f06f9195427c7017f5028d0894f57eb216b0a8f7c4eda7ce883732aeb2d0fc
+            dest: 3rdparty/glad
+
+      - name: libass
+        cleanup:
+          - /include
+          - /lib/pkgconfig
+        config-opts:
+          - --disable-static
+        sources:
+          - type: archive
+            url: https://github.com/libass/libass/releases/download/0.17.3/libass-0.17.3.tar.gz
+            sha256: da7c348deb6fa6c24507afab2dee7545ba5dd5bbf90a137bfe9e738f7df68537
+
+  - name: podcast-merlin
+    buildsystem: simple
+    build-commands:
+      # Copy application bundle to /app/podcast_merlin_flutter
+      - install -dm755 /app/bin /app/podcast_merlin_flutter
+      - cp -a * /app/podcast_merlin_flutter/
+      # Create launcher
+      - ln -sf /app/podcast_merlin_flutter/podcast_merlin_flutter /app/bin/podcast_merlin_flutter
+      # Install desktop integration
+      - install -Dm644 share/applications/com.podcastmerlin.podcast_merlin_flutter.desktop /app/share/applications/com.podcastmerlin.podcast_merlin_flutter.desktop
+      - install -Dm644 share/metainfo/com.podcastmerlin.podcast_merlin_flutter.metainfo.xml /app/share/metainfo/com.podcastmerlin.podcast_merlin_flutter.metainfo.xml
+      - install -Dm644 share/icons/hicolor/512x512/apps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/icons/hicolor/512x512/apps/com.podcastmerlin.podcast_merlin_flutter.png
+      - install -Dm644 share/icons/hicolor/256x256/apps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/icons/hicolor/256x256/apps/com.podcastmerlin.podcast_merlin_flutter.png
+      - install -Dm644 share/icons/hicolor/128x128/apps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/icons/hicolor/128x128/apps/com.podcastmerlin.podcast_merlin_flutter.png
+      - install -Dm644 share/icons/hicolor/64x64/apps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/icons/hicolor/64x64/apps/com.podcastmerlin.podcast_merlin_flutter.png
+      - install -Dm644 share/icons/hicolor/32x32/apps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/icons/hicolor/32x32/apps/com.podcastmerlin.podcast_merlin_flutter.png
+      - install -Dm644 share/icons/hicolor/16x16/apps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/icons/hicolor/16x16/apps/com.podcastmerlin.podcast_merlin_flutter.png
+      - install -Dm644 share/icons/hicolor/scalable/apps/com.podcastmerlin.podcast_merlin_flutter.svg /app/share/icons/hicolor/scalable/apps/com.podcastmerlin.podcast_merlin_flutter.svg
+      - install -Dm644 share/pixmaps/com.podcastmerlin.podcast_merlin_flutter.png /app/share/pixmaps/com.podcastmerlin.podcast_merlin_flutter.png
+    sources:
+      - type: dir
+        path: build/linux/x64/release/bundle
