@@ -107,6 +107,12 @@ The author and sole copyright holder, **Yehonatan Vishna**, reserves the unrestr
 
 ---
 
+## Privacy Policy
+
+Podcast Merlin is designed with a local-first, zero-telemetry architecture. All subscriptions, playback state, and downloaded media remain on your device unless you explicitly configure synchronization with a Nextcloud or gPodder server. For full details on data handling, permissions, and security, read our [Privacy Policy](PRIVACY.md).
+
+---
+
 ## Trademark Notices & Disclaimers
 
 - **Apple, Apple Podcasts, and iTunes** are trademarks of Apple Inc., registered in the U.S. and other countries. Podcast Merlin interfaces with the public iTunes Search API for catalog discovery and is not endorsed or certified by Apple Inc.
