@@ -1082,6 +1082,7 @@ class EpisodeDownloadService {
       for (final entry in activeTokens.entries) {
         final epId = entry.key;
         final token = entry.value;
+        _activeDownloads.remove(epId);
         _pausedEpisodeIds.remove(epId);
         token.cancel('Cancelled by user');
         await _db.clearEpisodeDownload(epId);

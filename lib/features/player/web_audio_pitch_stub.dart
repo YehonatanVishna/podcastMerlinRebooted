@@ -1,0 +1,1 @@
+void setWebAudioPreservesPitch(bool preservesPitch) {}

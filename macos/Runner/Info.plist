@@ -28,5 +28,9 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Used to detect your current Wi-Fi SSID for network-restricted gPodder synchronization.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Used to detect your current Wi-Fi SSID for network-restricted gPodder synchronization.</string>
 </dict>
 </plist>

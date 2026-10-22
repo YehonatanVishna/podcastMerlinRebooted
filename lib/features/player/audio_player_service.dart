@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import '../../core/database/database_helper.dart';
 import '../../core/database/ffi_init.dart';
@@ -14,6 +15,7 @@ import '../sync/secure_storage_service.dart';
 import '../sync/sync_service.dart';
 import 'linux_mpris_service.dart';
 import 'podcast_widget_service.dart';
+import 'web_audio_pitch.dart';
 
 typedef PositionUpdateEvent = ({String mediaUrl, int position, bool isPlayed});
 enum SleepTimerMode { none, duration, endOfEpisode }
@@ -32,6 +34,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
 
   // Configurable playback settings
   bool autoAdvanceQueue = true;
+  bool normalizePitch = true;
   int markAsPlayedThresholdSeconds = 60;
   AutoFocusLossAction audioFocusLossAction = AutoFocusLossAction.pauseAndResume;
   int sleepTimerFadeOutSeconds = 15;
@@ -269,11 +272,32 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         if (_speed != 1.0) {
           await _player.setSpeed(_speed);
         }
+        await _applyPitch();
         if (skipSilence) {
           try {
             await _player.setSkipSilenceEnabled(true);
           } catch (_) {}
         }
+      } else {
+        await _applyPitch();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _applyPitch() async {
+    try {
+      if (kIsWeb) {
+        setWebAudioPreservesPitch(normalizePitch);
+      }
+      if (!kIsWeb && (Platform.isMacOS || Platform.isIOS)) {
+        try {
+          const channel = MethodChannel('com.podcastmerlin.app/audio_pitch');
+          await channel.invokeMethod('setNormalizePitch', {'normalize': normalizePitch});
+        } catch (_) {}
+      }
+      if (urlLoader == null) {
+        final targetPitch = normalizePitch ? 1.0 : _speed;
+        await _player.setPitch(targetPitch);
       }
     } catch (_) {}
   }
@@ -324,6 +348,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   // Seek durations getters
   Stream<({int rewind, int fastForward})> get seekDurationsStream => _seekDurationsController.stream;
   double get speed => urlLoader != null ? _speed : _player.speed;
+  double get pitch => normalizePitch ? 1.0 : _speed;
 
   Future<void> _initAudioSession() async {
     try {
@@ -945,10 +970,17 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       _speed = speed;
       if (urlLoader != null) {
         playbackState.add(playbackState.value.copyWith(speed: speed));
+        await _applyPitch();
         return;
       }
       await _player.setSpeed(speed);
+      await _applyPitch();
     } catch (_) {}
+  }
+
+  Future<void> setNormalizePitch(bool normalize) async {
+    normalizePitch = normalize;
+    await _applyPitch();
   }
 
   Future<void> seekRelative(int seconds) async {

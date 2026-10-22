@@ -1,8 +1,11 @@
+import 'dart:convert';
 import '../podcasts/rss_feed_parser.dart';
 import '../../core/database/database_helper.dart';
+import '../../core/models/app_settings.dart';
 import '../../core/models/podcast.dart';
 import '../../core/models/sync_status.dart';
 import '../../core/services/image_cache_service.dart';
+import '../../core/services/network_info_service.dart';
 import '../../core/utils/error_formatter.dart';
 import 'gpodder_api_client.dart';
 import 'secure_storage_service.dart';
@@ -14,21 +17,58 @@ class SyncService {
   final SecureStorageService _storage;
   final DatabaseHelper _db;
   final RssFeedParser _rssParser;
+  final NetworkInfoService _networkInfoService;
 
   String? lastError;
   List<String> lastFeedWarnings = [];
   bool _isPushingActions = false;
   bool _needsRepush = false;
 
+  GpodderNetworkRestrictionMode networkMode = GpodderNetworkRestrictionMode.anyNetwork;
+  String allowedSsid = '';
+  bool allowEthernet = true;
+
   SyncService({
     GPodderApiClient? apiClient,
     SecureStorageService? storage,
     DatabaseHelper? db,
     RssFeedParser? rssParser,
+    NetworkInfoService? networkInfoService,
   })  : _apiClient = apiClient ?? GPodderApiClient(),
         _storage = storage ?? SecureStorageService(),
         _db = db ?? DatabaseHelper.instance,
-        _rssParser = rssParser ?? RssFeedParser();
+        _rssParser = rssParser ?? RssFeedParser(),
+        _networkInfoService = networkInfoService ?? NetworkInfoService();
+
+  void updateNetworkConstraints({
+    GpodderNetworkRestrictionMode? networkMode,
+    String? allowedSsid,
+    bool? allowEthernet,
+  }) {
+    if (networkMode != null) this.networkMode = networkMode;
+    if (allowedSsid != null) this.allowedSsid = allowedSsid;
+    if (allowEthernet != null) this.allowEthernet = allowEthernet;
+  }
+
+  Future<({bool allowed, String? reason})> checkNetworkAllowed() async {
+    if (networkMode == GpodderNetworkRestrictionMode.anyNetwork && allowedSsid.isEmpty) {
+      try {
+        final settingsJson = await _storage.read('merlin_app_settings_v1');
+        if (settingsJson != null && settingsJson.isNotEmpty) {
+          final map = jsonDecode(settingsJson) as Map<String, dynamic>;
+          final loaded = AppSettings.fromJson(map);
+          networkMode = loaded.gpodderNetworkMode;
+          allowedSsid = loaded.gpodderAllowedSsid;
+          allowEthernet = loaded.gpodderAllowEthernet;
+        }
+      } catch (_) {}
+    }
+    return _networkInfoService.checkGpodderAccess(
+      mode: networkMode,
+      allowedSsid: allowedSsid,
+      allowEthernet: allowEthernet,
+    );
+  }
 
   Future<void> clearCredentials() async {
     await _storage.clearNextcloudCredentials();
@@ -59,6 +99,19 @@ class SyncService {
       // Local-only mode: refresh local podcast feeds directly without requiring gPodder
       onProgress?.call(SyncStage.fetchingFeed, 'Refreshing local subscriptions...');
       await _refreshLocalPodcastsDirectly(onProgress, isLocalOnlyMode: true);
+      return true;
+    }
+
+    final netAccess = await checkNetworkAllowed();
+    if (!netAccess.allowed) {
+      final reason = netAccess.reason ?? 'Network not allowed for gPodder sync.';
+      if (requireGpodder || forceFullResync) {
+        lastError = reason;
+        return false;
+      }
+      lastFeedWarnings.add('gPodder sync skipped: $reason. Falling back to refreshing local feeds.');
+      onProgress?.call(SyncStage.fetchingFeed, 'gPodder network restricted. Refreshing local subscriptions...');
+      await _refreshLocalPodcastsDirectly(onProgress);
       return true;
     }
 
@@ -343,6 +396,11 @@ class SyncService {
 
   /// Push both pending subscription changes and pending playback actions to gPodder
   Future<bool> pushPendingBacklog() async {
+    final netAccess = await checkNetworkAllowed();
+    if (!netAccess.allowed) {
+      return false;
+    }
+
     final serverUrl = await _storage.read(SecureStorageService.keyServerUrl);
     final username = await _storage.read(SecureStorageService.keyUsername);
     final password = await _storage.read(SecureStorageService.keyPassword);
@@ -392,6 +450,11 @@ class SyncService {
 
   /// Push any pending actions to gPodder server asynchronously
   Future<bool> pushPendingActions() async {
+    final netAccess = await checkNetworkAllowed();
+    if (!netAccess.allowed) {
+      return false;
+    }
+
     final serverUrl = await _storage.read(SecureStorageService.keyServerUrl);
     final username = await _storage.read(SecureStorageService.keyUsername);
     final password = await _storage.read(SecureStorageService.keyPassword);

@@ -24,6 +24,8 @@ finish-args:
 
   # Network (fetching RSS, podcast audio streaming, gPodder/Nextcloud API)
   - --share=network
+  - --system-talk-name=org.freedesktop.NetworkManager
+  - --system-talk-name=org.freedesktop.NetworkManager
 
   # Secret Service (storing Nextcloud / gPodder passwords and tokens securely via libsecret)
   - --talk-name=org.freedesktop.secrets

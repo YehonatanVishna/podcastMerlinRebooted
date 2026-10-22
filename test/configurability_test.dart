@@ -1,11 +1,15 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:podcast_merlin_flutter/core/models/gpodder_action.dart';
 import 'package:podcast_merlin_flutter/core/providers/app_providers.dart';
 import 'package:podcast_merlin_flutter/features/downloads/episode_download_service.dart';
 import 'package:podcast_merlin_flutter/features/player/audio_player_service.dart';
+import 'package:podcast_merlin_flutter/features/sync/gpodder_api_client.dart';
 import 'package:podcast_merlin_flutter/features/sync/secure_storage_service.dart';
+import 'package:podcast_merlin_flutter/features/sync/sync_service.dart';
 import 'package:podcast_merlin_flutter/features/ui/views/settings_view.dart';
 
 class MockSecureStorage extends SecureStorageService {
@@ -24,6 +28,51 @@ class MockSecureStorage extends SecureStorageService {
   @override
   Future<void> delete(String key) async {
     _data.remove(key);
+  }
+}
+
+class MockNetworkInfoService extends NetworkInfoService {
+  NetworkConnectionInfo infoToReturn;
+  MockNetworkInfoService([this.infoToReturn = const NetworkConnectionInfo()]);
+
+  @override
+  Future<NetworkConnectionInfo> getNetworkInfo({bool requestPermission = false}) async {
+    return infoToReturn;
+  }
+}
+
+class MockGPodderApiClient extends GPodderApiClient {
+  int pingCount = 0;
+  bool pingResult = true;
+
+  @override
+  Future<bool> pingServer({
+    required String serverUrl,
+    required String username,
+    required String password,
+  }) async {
+    pingCount++;
+    return pingResult;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> fetchSubscriptions({
+    required String serverUrl,
+    required String username,
+    required String password,
+    int sinceTimestamp = 0,
+  }) async {
+    return {'add': <String>[], 'remove': <String>[], 'timestamp': 100};
+  }
+
+  @override
+  Future<List<GPodderAction>> fetchEpisodeActions({
+    required String serverUrl,
+    required String username,
+    required String password,
+    int sinceTimestamp = 0,
+  }) async {
+    return [];
   }
 }
 
@@ -61,6 +110,10 @@ void main() {
       expect(settings.periodicSyncIntervalMinutes, 180);
       expect(settings.syncConflictPolicy, SyncConflictPolicy.furthestPosition);
       expect(settings.deviceId, 'podcast_merlin_flutter');
+      expect(settings.normalizePitch, isTrue);
+      expect(settings.gpodderNetworkMode, GpodderNetworkRestrictionMode.anyNetwork);
+      expect(settings.gpodderAllowedSsid, isEmpty);
+      expect(settings.gpodderAllowEthernet, isTrue);
     });
 
     test('Json roundtrip serialization preserves all fields', () {
@@ -89,6 +142,10 @@ void main() {
         periodicSyncIntervalMinutes: 60,
         syncConflictPolicy: SyncConflictPolicy.latestTimestamp,
         deviceId: 'custom_device_id',
+        normalizePitch: false,
+        gpodderNetworkMode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        gpodderAllowedSsid: 'Home-Fiber-5G',
+        gpodderAllowEthernet: true,
       );
 
       final jsonMap = original.toJson();
@@ -118,6 +175,10 @@ void main() {
       expect(parsed.periodicSyncIntervalMinutes, 60);
       expect(parsed.syncConflictPolicy, SyncConflictPolicy.latestTimestamp);
       expect(parsed.deviceId, 'custom_device_id');
+      expect(parsed.normalizePitch, isFalse);
+      expect(parsed.gpodderNetworkMode, GpodderNetworkRestrictionMode.specificWifiSsid);
+      expect(parsed.gpodderAllowedSsid, 'Home-Fiber-5G');
+      expect(parsed.gpodderAllowEthernet, isTrue);
     });
 
     test('fromJson gracefully falls back to defaults when encountering unknown enum values or corrupted types', () {
@@ -129,6 +190,8 @@ void main() {
         'audioFocusLossAction': 'explode_phone',
         'autoDeletePlayed': 'after_100_years',
         'syncConflictPolicy': 'nuclear_option',
+        'gpodderNetworkMode': 'satellite_mars_link',
+        'normalizePitch': 'not_a_bool',
         'defaultPlaybackSpeed': 'not_a_number',
         'markAsPlayedThresholdSeconds': 'invalid_int',
         'compactEpisodeRows': 'not_a_bool',
@@ -145,6 +208,8 @@ void main() {
       expect(parsed.defaultPlaybackSpeed, 1.0);
       expect(parsed.markAsPlayedThresholdSeconds, 60);
       expect(parsed.compactEpisodeRows, isFalse);
+      expect(parsed.normalizePitch, isTrue);
+      expect(parsed.gpodderNetworkMode, GpodderNetworkRestrictionMode.anyNetwork);
     });
 
     test('fromJson safely ignores legacy podcast index keys and preferredSearchProvider', () {
@@ -214,6 +279,18 @@ void main() {
       expect(container.read(appSettingsProvider).autoDownloadMaxPerShow, 5);
       expect(container.read(appSettingsProvider).autoDownloadEpisodesPerShow, 5);
 
+      notifier.setNormalizePitch(false);
+      expect(container.read(appSettingsProvider).normalizePitch, isFalse);
+
+      notifier.setGpodderNetworkMode(GpodderNetworkRestrictionMode.specificWifiSsid);
+      expect(container.read(appSettingsProvider).gpodderNetworkMode, GpodderNetworkRestrictionMode.specificWifiSsid);
+
+      notifier.setGpodderAllowedSsid('Home-Studio-5G');
+      expect(container.read(appSettingsProvider).gpodderAllowedSsid, 'Home-Studio-5G');
+
+      notifier.setGpodderAllowEthernet(true);
+      expect(container.read(appSettingsProvider).gpodderAllowEthernet, isTrue);
+
       // Wait for async persistence to complete
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
@@ -229,6 +306,10 @@ void main() {
       expect(decoded['autoDeleteAfterPlay'], true);
       expect(decoded['autoDownloadNewEpisodes'], true);
       expect(decoded['autoDownloadMaxPerShow'], 5);
+      expect(decoded['normalizePitch'], false);
+      expect(decoded['gpodderNetworkMode'], 'specificWifiSsid');
+      expect(decoded['gpodderAllowedSsid'], 'Home-Studio-5G');
+      expect(decoded['gpodderAllowEthernet'], true);
 
       container.dispose();
     });
@@ -258,6 +339,21 @@ void main() {
       expect(handler.autoDeleteAfterPlay, isTrue);
       handler.setAutoDeleteAfterPlay(false);
       expect(handler.autoDeleteAfterPlay, isFalse);
+
+      expect(handler.normalizePitch, isTrue);
+      expect(handler.pitch, 1.0);
+      handler.setSpeed(2.0);
+      expect(handler.pitch, 1.0); // speed is 2.0, but normalizePitch is true so pitch is 1.0
+      handler.setNormalizePitch(false);
+      expect(handler.normalizePitch, isFalse);
+      expect(handler.pitch, 2.0); // speed is 2.0 and normalizePitch is false
+      handler.setSpeed(0.75);
+      expect(handler.pitch, 0.75);
+      handler.setSpeed(1.5);
+      expect(handler.pitch, 1.5);
+      handler.setNormalizePitch(true);
+      expect(handler.normalizePitch, isTrue);
+      expect(handler.pitch, 1.0);
 
       handler.dispose();
     });
@@ -524,6 +620,365 @@ void main() {
       expect(swatchCheckmark, findsNothing);
 
       container.dispose();
+    });
+
+    testWidgets('Normalize Audio Pitch toggle switches normalizePitch setting', (tester) async {
+      final mockStorage = MockSecureStorage();
+      late ProviderContainer container;
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container = ProviderContainer(
+            overrides: [
+              secureStorageProvider.overrideWithValue(mockStorage),
+              downloadStorageUsageBytesProvider.overrideWith((ref) => Future.value(0)),
+              downloadedEpisodesCountProvider.overrideWith((ref) => Future.value(0)),
+            ],
+          ),
+          child: const MaterialApp(
+            home: SettingsView(),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      expect(container.read(appSettingsProvider).normalizePitch, isTrue);
+
+      final pitchTile = find.widgetWithText(SwitchListTile, 'Normalize Audio Pitch');
+      expect(pitchTile, findsOneWidget);
+
+      await tester.ensureVisible(pitchTile);
+      await tester.tap(pitchTile);
+      await tester.pumpAndSettle();
+
+      expect(container.read(appSettingsProvider).normalizePitch, isFalse);
+
+      await tester.tap(pitchTile);
+      await tester.pumpAndSettle();
+
+      expect(container.read(appSettingsProvider).normalizePitch, isTrue);
+
+      await tester.pump(const Duration(seconds: 15));
+      container.dispose();
+    });
+
+    testWidgets('gPodder Network Restriction dropdown switches mode and reveals SSID field', (tester) async {
+      final mockStorage = MockSecureStorage();
+      late ProviderContainer container;
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container = ProviderContainer(
+            overrides: [
+              secureStorageProvider.overrideWithValue(mockStorage),
+              downloadStorageUsageBytesProvider.overrideWith((ref) => Future.value(0)),
+              downloadedEpisodesCountProvider.overrideWith((ref) => Future.value(0)),
+            ],
+          ),
+          child: const MaterialApp(
+            home: SettingsView(),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      expect(container.read(appSettingsProvider).gpodderNetworkMode, GpodderNetworkRestrictionMode.anyNetwork);
+
+      // The SSID input should not be visible initially
+      expect(find.text('Allowed Wi-Fi SSID / Network Name'), findsNothing);
+
+      // Select Specific Wi-Fi Network (SSID) Only
+      final dropdownFinder = find.widgetWithText(DropdownButtonFormField<GpodderNetworkRestrictionMode>, 'gPodder Sync Allowed Networks');
+      expect(dropdownFinder, findsOneWidget);
+
+      await tester.ensureVisible(dropdownFinder);
+      await tester.tap(dropdownFinder);
+      await tester.pumpAndSettle();
+
+      final specificOption = find.text('Specific Wi-Fi Network (SSID) Only').last;
+      await tester.tap(specificOption);
+      await tester.pumpAndSettle();
+
+      expect(container.read(appSettingsProvider).gpodderNetworkMode, GpodderNetworkRestrictionMode.specificWifiSsid);
+
+      // SSID input, Use Current Wi-Fi button, and Ethernet switch should now be visible
+      expect(find.text('Allowed Wi-Fi SSID / Network Name'), findsOneWidget);
+      expect(find.text('Use Current Wi-Fi'), findsOneWidget);
+
+      final ethernetSwitch = find.widgetWithText(SwitchListTile, 'Also allow on Wired Ethernet');
+      expect(ethernetSwitch, findsOneWidget);
+      expect(container.read(appSettingsProvider).gpodderAllowEthernet, isTrue);
+
+      await tester.ensureVisible(ethernetSwitch);
+      await tester.tap(ethernetSwitch);
+      await tester.pumpAndSettle();
+
+      expect(container.read(appSettingsProvider).gpodderAllowEthernet, isFalse);
+
+      await tester.pump(const Duration(seconds: 15));
+      container.dispose();
+    });
+  });
+
+  group('NetworkInfoService Network Gating Tests', () {
+    test('cleanSsid cleans surrounding quotes, whitespace, and invalid tokens', () {
+      expect(NetworkInfoService.cleanSsid(null), '');
+      expect(NetworkInfoService.cleanSsid(''), '');
+      expect(NetworkInfoService.cleanSsid('   '), '');
+      expect(NetworkInfoService.cleanSsid('"MyHomeNetwork"'), 'MyHomeNetwork');
+      expect(NetworkInfoService.cleanSsid("'Office_Wifi'"), 'Office_Wifi');
+      expect(NetworkInfoService.cleanSsid('<unknown ssid>'), '');
+      expect(NetworkInfoService.cleanSsid('0x'), '');
+    });
+
+    test('anyNetwork allows connection regardless of network state', () async {
+      final netService = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isCellular: true),
+      );
+
+      final res = await netService.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.anyNetwork,
+        allowedSsid: 'HomeWifi',
+      );
+
+      expect(res.allowed, isTrue);
+      expect(res.reason, isNull);
+    });
+
+    test('wifiOrEthernetOnly blocks cellular-only and allows Wi-Fi or Ethernet', () async {
+      final cellularOnly = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isCellular: true, isWifi: false, isEthernet: false),
+      );
+      final cellRes = await cellularOnly.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.wifiOrEthernetOnly,
+        allowedSsid: '',
+      );
+      expect(cellRes.allowed, isFalse);
+      expect(cellRes.reason, contains('cellular'));
+
+      final wifiNet = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isWifi: true, isCellular: false),
+      );
+      final wifiRes = await wifiNet.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.wifiOrEthernetOnly,
+        allowedSsid: '',
+      );
+      expect(wifiRes.allowed, isTrue);
+      expect(wifiRes.reason, isNull);
+
+      final ethNet = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isEthernet: true, isCellular: false),
+      );
+      final ethRes = await ethNet.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.wifiOrEthernetOnly,
+        allowedSsid: '',
+      );
+      expect(ethRes.allowed, isTrue);
+    });
+
+    test('specificWifiSsid allows matching SSID and blocks mismatched or missing SSID', () async {
+      final homeNet = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isWifi: true, ssid: 'Home-Fiber-5G'),
+      );
+
+      // Exact match
+      final matchRes = await homeNet.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: 'Home-Fiber-5G',
+      );
+      expect(matchRes.allowed, isTrue);
+
+      // Case-insensitive match with whitespace
+      final caseRes = await homeNet.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: '  home-fiber-5g  ',
+      );
+      expect(caseRes.allowed, isTrue);
+
+      // Comma-separated list matching one
+      final listRes = await homeNet.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: 'OfficeWifi, Home-Fiber-5G, Guest',
+      );
+      expect(listRes.allowed, isTrue);
+
+      // Mismatched SSID
+      final mismatchRes = await homeNet.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: 'OtherWifi',
+      );
+      expect(mismatchRes.allowed, isFalse);
+      expect(mismatchRes.reason, contains('OtherWifi'));
+
+      // Empty allowedSsid acts as unconfigured / allowed
+      final emptyRes = await homeNet.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: '',
+      );
+      expect(emptyRes.allowed, isTrue);
+
+      // Connected without SSID / cellular
+      final noSsidNet = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isCellular: true, ssid: null),
+      );
+      final noSsidRes = await noSsidNet.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: 'Home-Fiber-5G',
+      );
+      expect(noSsidRes.allowed, isFalse);
+    });
+
+    test('specificWifiSsid allows wired Ethernet when allowEthernet is true and blocks when false', () async {
+      final ethernetNet = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isEthernet: true, isWifi: false, ssid: null),
+      );
+
+      // When allowEthernet is true (default), wired Ethernet on home network is allowed
+      final allowEthRes = await ethernetNet.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: 'HomeWifi',
+        allowEthernet: true,
+      );
+      expect(allowEthRes.allowed, isTrue);
+
+      // When allowEthernet is false, wired Ethernet is rejected
+      final disallowEthRes = await ethernetNet.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: 'HomeWifi',
+        allowEthernet: false,
+      );
+      expect(disallowEthRes.allowed, isFalse);
+    });
+  });
+
+  group('SyncService Network Gating Integration Tests', () {
+    test('performFullSync skips gPodder ping when network constraint is not met', () async {
+      final mockStorage = MockSecureStorage();
+      await mockStorage.write(SecureStorageService.keyServerUrl, 'https://example.com/gpodder');
+      await mockStorage.write(SecureStorageService.keyUsername, 'merlin_user');
+      await mockStorage.write(SecureStorageService.keyPassword, 'secret_pass');
+
+      final mockApi = MockGPodderApiClient();
+      final mockNet = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isCellular: true, ssid: null),
+      );
+
+      final syncService = SyncService(
+        apiClient: mockApi,
+        storage: mockStorage,
+        networkInfoService: mockNet,
+      );
+      syncService.updateNetworkConstraints(
+        networkMode: GpodderNetworkRestrictionMode.wifiOrEthernetOnly,
+        allowedSsid: '',
+      );
+
+      final success = await syncService.performFullSync();
+      expect(success, isTrue); // Falls back to local feeds refresh
+      expect(mockApi.pingCount, equals(0)); // Did NOT ping gPodder server
+      expect(syncService.lastFeedWarnings.isNotEmpty, isTrue);
+      expect(syncService.lastFeedWarnings.first, contains('gPodder sync skipped'));
+    });
+
+    test('pushPendingBacklog returns false immediately when network constraint is not met', () async {
+      final mockStorage = MockSecureStorage();
+      await mockStorage.write(SecureStorageService.keyServerUrl, 'https://example.com/gpodder');
+      await mockStorage.write(SecureStorageService.keyUsername, 'merlin_user');
+      await mockStorage.write(SecureStorageService.keyPassword, 'secret_pass');
+
+      final mockApi = MockGPodderApiClient();
+      final mockNet = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isWifi: true, ssid: 'CoffeeShopWifi'),
+      );
+
+      final syncService = SyncService(
+        apiClient: mockApi,
+        storage: mockStorage,
+        networkInfoService: mockNet,
+      );
+      syncService.updateNetworkConstraints(
+        networkMode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: 'HomeWifi',
+      );
+
+      final result = await syncService.pushPendingBacklog();
+      expect(result, isFalse);
+      expect(mockApi.pingCount, equals(0));
+    });
+
+    test('pushPendingActions returns false immediately when network constraint is not met', () async {
+      final mockStorage = MockSecureStorage();
+      await mockStorage.write(SecureStorageService.keyServerUrl, 'https://example.com/gpodder');
+      await mockStorage.write(SecureStorageService.keyUsername, 'merlin_user');
+      await mockStorage.write(SecureStorageService.keyPassword, 'secret_pass');
+
+      final mockApi = MockGPodderApiClient();
+      final mockNet = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isCellular: true, ssid: null),
+      );
+
+      final syncService = SyncService(
+        apiClient: mockApi,
+        storage: mockStorage,
+        networkInfoService: mockNet,
+      );
+      syncService.updateNetworkConstraints(
+        networkMode: GpodderNetworkRestrictionMode.wifiOrEthernetOnly,
+        allowedSsid: '',
+      );
+
+      final result = await syncService.pushPendingActions();
+      expect(result, isFalse);
+    });
+
+    test('performFullSync allows sync on wired Ethernet when specificWifiSsid is configured with allowEthernet: true', () async {
+      final mockStorage = MockSecureStorage();
+      await mockStorage.write(SecureStorageService.keyServerUrl, 'https://example.com/gpodder');
+      await mockStorage.write(SecureStorageService.keyUsername, 'merlin_user');
+      await mockStorage.write(SecureStorageService.keyPassword, 'secret_pass');
+
+      final mockApi = MockGPodderApiClient();
+      final mockNet = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isEthernet: true, isWifi: false, ssid: null),
+      );
+
+      final syncService = SyncService(
+        apiClient: mockApi,
+        storage: mockStorage,
+        networkInfoService: mockNet,
+      );
+      syncService.updateNetworkConstraints(
+        networkMode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: 'HomeWifi',
+        allowEthernet: true,
+      );
+
+      final success = await syncService.performFullSync();
+      expect(success, isTrue);
+      expect(mockApi.pingCount, equals(1)); // Pinged server successfully over Ethernet!
+    });
+
+    test('audio_pitch method channel is called on setNormalizePitch', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final List<MethodCall> methodCalls = [];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('com.podcastmerlin.app/audio_pitch'), (call) async {
+        methodCalls.add(call);
+        return null;
+      });
+
+      final handler = MerlinAudioHandler(
+        urlLoader: (_) async {},
+      );
+      await handler.setNormalizePitch(false);
+      expect(handler.normalizePitch, isFalse);
+      expect(methodCalls.any((call) => call.method == 'setNormalizePitch' && (call.arguments as Map)['normalize'] == false), isTrue);
+
+      await handler.setNormalizePitch(true);
+      expect(handler.normalizePitch, isTrue);
+      expect(methodCalls.any((call) => call.method == 'setNormalizePitch' && (call.arguments as Map)['normalize'] == true), isTrue);
     });
   });
 }
