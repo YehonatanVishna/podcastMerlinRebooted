@@ -1,0 +1,31 @@
+Categories:
+  - Multimedia
+  - Audio
+License: AGPL-3.0-or-later
+AuthorName: Yehonatan Vishna
+AuthorEmail: yehonathan.vishna@gmail.com
+SourceCode: https://github.com/YehonatanVishna/podcastMerlinRebooted
+IssueTracker: https://github.com/YehonatanVishna/podcastMerlinRebooted/issues
+Changelog: https://github.com/YehonatanVishna/podcastMerlinRebooted/releases
+
+AutoName: Podcast Merlin
+
+RepoType: git
+Repo: https://github.com/YehonatanVishna/podcastMerlinRebooted.git
+
+Builds:
+  - versionName: 0.1.0
+    versionCode: 1
+    commit: v0.1.0
+    srclibs:
+      - flutter@stable
+    prebuild:
+      - $$flutter$$/bin/flutter pub get
+    build:
+      - $$flutter$$/bin/flutter build apk --release
+    output: build/app/outputs/flutter-apk/app-release.apk
+
+AutoUpdateMode: Version v%v
+UpdateCheckMode: Tags
+CurrentVersion: 0.1.0
+CurrentVersionCode: 1
