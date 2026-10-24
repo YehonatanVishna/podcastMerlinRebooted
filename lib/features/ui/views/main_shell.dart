@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../../core/models/podcast.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../../core/services/widget_launch_service.dart';
 import '../../../core/utils/responsive.dart';
+import '../widgets/now_playing_sheet.dart';
 import '../widgets/player_dock.dart';
 import 'download_center_view.dart';
 import 'episode_list_view.dart';
@@ -76,6 +78,9 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
 
       _setupPeriodicSync();
 
+      // Cold start from a home widget tap: open the Now Playing sheet.
+      _checkWidgetLaunch();
+
       _playbackErrorSub = ref.read(audioHandlerProvider).onPlaybackError.listen((errorMsg) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -116,6 +121,27 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
         state == AppLifecycleState.detached ||
         state == AppLifecycleState.hidden) {
       ref.read(audioHandlerProvider).flushCurrentPlaybackPosition();
+    } else if (state == AppLifecycleState.resumed) {
+      // Covers widget taps while the activity is alive (onNewIntent) and the case where
+      // MainActivity attaches to an engine already started headlessly by AudioService
+      // (initState has already run, so the post-frame check above won't fire again).
+      _checkWidgetLaunch();
+    }
+  }
+
+  bool _checkingWidgetLaunch = false;
+
+  Future<void> _checkWidgetLaunch() async {
+    if (_checkingWidgetLaunch) return;
+    _checkingWidgetLaunch = true;
+    try {
+      final uri = await WidgetLaunchService.instance.consumeWidgetLaunch();
+      if (!mounted || !WidgetLaunchService.shouldOpenNowPlaying(uri)) return;
+      final audioHandler = ref.read(audioHandlerProvider);
+      if (audioHandler.mediaItem.value == null && audioHandler.currentEpisode == null) return;
+      unawaited(NowPlayingSheet.show(context));
+    } finally {
+      _checkingWidgetLaunch = false;
     }
   }
 

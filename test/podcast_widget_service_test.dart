@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:podcast_merlin_flutter/core/models/app_settings.dart';
+import 'package:podcast_merlin_flutter/core/theme/app_theme.dart';
 import 'package:podcast_merlin_flutter/features/player/podcast_widget_service.dart';
 
 class _TestAudioHandler extends BaseAudioHandler {
@@ -402,6 +407,88 @@ void main() {
       );
       // Count should still be 1 (no redundant save or IPC)
       expect(updatedWidgets.length, 1);
+    });
+  });
+
+  group('PodcastWidgetService theme sync', () {
+    final dynamicDark = ColorScheme.fromSeed(
+      seedColor: const Color(0xFF2E7D32),
+      brightness: Brightness.dark,
+    );
+
+    tearDown(() {
+      PodcastWidgetService.instance.dynamicDarkResolver = () async => null;
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    int argb(Color c) => c.toARGB32().toSigned(32);
+
+    test('dynamic + AMOLED omits surface color so Android uses the wallpaper tint', () {
+      const settings = AppSettings(themeMode: AppThemeMode.amoled, useDynamicColor: true);
+      final colors = PodcastWidgetService.resolveWidgetColors(settings, dynamicDark: dynamicDark);
+      expect(colors.surface, isNull);
+      expect(colors.primary, AppTheme.createAmoledTheme(dynamicDark).colorScheme.primary);
+    });
+
+    test('AMOLED without dynamic colors also omits surface color', () {
+      const settings = AppSettings(themeMode: AppThemeMode.amoled, useDynamicColor: false);
+      expect(PodcastWidgetService.resolveWidgetColors(settings).surface, isNull);
+    });
+
+    test('custom dark theme without dynamic colors tints surface', () {
+      const settings = AppSettings(
+        themeMode: AppThemeMode.dark,
+        useDynamicColor: false,
+        accentColor: AppAccentColor.purple,
+      );
+      final colors = PodcastWidgetService.resolveWidgetColors(settings);
+      final expected = AppTheme.createDarkTheme(null, seedColor: settings.accentColor.color);
+      expect(colors.surface, expected.colorScheme.surfaceContainer);
+      expect(colors.primary, expected.colorScheme.primary);
+    });
+
+    test('syncThemeWithSettings resolves dynamic palette headlessly instead of purple fallback',
+        () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final service = PodcastWidgetService.instance;
+      service.dynamicDarkResolver = () async => dynamicDark;
+
+      const settings = AppSettings(themeMode: AppThemeMode.amoled, useDynamicColor: true);
+      await service.syncThemeWithSettings(settings);
+
+      final expectedPrimary = AppTheme.createAmoledTheme(dynamicDark).colorScheme.primary;
+      expect(savedData['widget_color_primary'], argb(expectedPrimary));
+      expect(savedData['widget_color_primary'], isNot(argb(AppTheme.defaultDarkSeed)));
+      expect(savedData.containsKey('widget_color_surface'), isTrue);
+      expect(savedData['widget_color_surface'], isNull);
+      expect(updatedWidgets, isNotEmpty);
+    });
+
+    test('syncThemeWithSettings drops stale results when a newer sync starts', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final service = PodcastWidgetService.instance;
+      final completer = Completer<ColorScheme?>();
+      service.dynamicDarkResolver = () => completer.future;
+
+      final stale = service.syncThemeWithSettings(const AppSettings(useDynamicColor: true));
+      const custom = AppSettings(
+        themeMode: AppThemeMode.dark,
+        useDynamicColor: false,
+        accentColor: AppAccentColor.purple,
+      );
+      await service.syncThemeWithSettings(custom);
+      completer.complete(dynamicDark);
+      await stale;
+
+      final expected = PodcastWidgetService.resolveWidgetColors(custom);
+      expect(savedData['widget_color_primary'], argb(expected.primary));
+      expect(savedData['widget_color_surface'], argb(expected.surface!));
+    });
+
+    test('syncThemeWithSettings is a no-op off Android', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      await PodcastWidgetService.instance.syncThemeWithSettings(const AppSettings());
+      expect(savedData, isEmpty);
     });
   });
 }

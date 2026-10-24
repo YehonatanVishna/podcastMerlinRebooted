@@ -9,19 +9,27 @@ class SecureStorageService {
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(resetOnError: true),
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
-    mOptions: MacOsOptions(accessibility: KeychainAccessibility.first_unlock),
+    mOptions: MacOsOptions(
+      accessibility: KeychainAccessibility.first_unlock,
+      usesDataProtectionKeychain: false,
+    ),
   );
 
   static bool _fallbackStorageUsed = false;
   static bool get fallbackStorageUsed => _fallbackStorageUsed;
+  static bool _hasLoggedWriteError = false;
+  static bool _hasLoggedReadError = false;
+  static bool _keychainDisabled = false;
 
   /// Checks if hardware/OS secure storage is functional without throwing.
   Future<bool> probeSecureStorageAvailable() async {
+    if (_keychainDisabled) return false;
     try {
       await _secureStorage.write(key: '__probe_key__', value: '1');
       await _secureStorage.delete(key: '__probe_key__');
       return true;
     } catch (_) {
+      _keychainDisabled = true;
       _fallbackStorageUsed = true;
       return false;
     }
@@ -39,33 +47,49 @@ class SecureStorageService {
   static const String keyUseDynamicColor = 'app_use_dynamic_color';
 
   Future<void> write(String key, String value) async {
-    try {
-      await _secureStorage.write(key: key, value: value);
-      _memoryFallback[key] = value;
-      await _deleteFallback(key);
-    } catch (e) {
-      _fallbackStorageUsed = true;
-      if (kDebugMode) print('SecureStorage write error, using fallback: $e');
-      await _writeFallback(key, value);
+    if (!_keychainDisabled) {
+      try {
+        await _secureStorage.write(key: key, value: value);
+        _memoryFallback[key] = value;
+        await _deleteFallback(key);
+        return;
+      } catch (e) {
+        _keychainDisabled = true;
+        _fallbackStorageUsed = true;
+        if (kDebugMode && !_hasLoggedWriteError) {
+          _hasLoggedWriteError = true;
+          debugPrint('SecureStorage unavailable, using local fallback store (further errors suppressed): $e');
+        }
+      }
     }
+    await _writeFallback(key, value);
   }
 
   Future<String?> read(String key) async {
-    try {
-      final value = await _secureStorage.read(key: key);
-      if (value != null && value.isNotEmpty) {
-        return value;
+    if (!_keychainDisabled) {
+      try {
+        final value = await _secureStorage.read(key: key);
+        if (value != null && value.isNotEmpty) {
+          return value;
+        }
+      } catch (e) {
+        _keychainDisabled = true;
+        _fallbackStorageUsed = true;
+        if (kDebugMode && !_hasLoggedReadError) {
+          _hasLoggedReadError = true;
+          debugPrint('SecureStorage unavailable, checking local fallback store (further errors suppressed): $e');
+        }
       }
-    } catch (e) {
-      if (kDebugMode) print('SecureStorage read error, checking fallback: $e');
     }
     return await _readFallback(key);
   }
 
   Future<void> delete(String key) async {
-    try {
-      await _secureStorage.delete(key: key);
-    } catch (_) {}
+    if (!_keychainDisabled) {
+      try {
+        await _secureStorage.delete(key: key);
+      } catch (_) {}
+    }
     await _deleteFallback(key);
   }
 

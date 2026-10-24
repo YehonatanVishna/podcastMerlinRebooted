@@ -15,6 +15,7 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
+import android.net.Uri
 import android.os.Build
 import android.view.KeyEvent
 import android.view.View
@@ -34,7 +35,12 @@ class PodcastPlayerWidgetProvider : HomeWidgetProvider() {
         appWidgetIds.forEach { widgetId ->
             val views = RemoteViews(context.packageName, R.layout.widget_podcast_player).apply {
                 // Open App on widget click
-                val openAppIntent = HomeWidgetLaunchIntent.getActivity(context, MainActivity::class.java)
+                // The URI tells the app to open the Now Playing sheet (consumed by MainActivity).
+                val openAppIntent = HomeWidgetLaunchIntent.getActivity(
+                    context,
+                    MainActivity::class.java,
+                    Uri.parse(MainActivity.NOW_PLAYING_URI)
+                )
                 setOnClickPendingIntent(R.id.widget_root, openAppIntent)
                 setOnClickPendingIntent(R.id.widget_info_container, openAppIntent)
                 setOnClickPendingIntent(R.id.widget_artwork, openAppIntent)

@@ -6,6 +6,7 @@ import 'package:podcast_merlin_flutter/core/database/database_helper.dart';
 import 'package:podcast_merlin_flutter/core/models/episode.dart';
 import 'package:podcast_merlin_flutter/core/models/podcast.dart';
 import 'package:podcast_merlin_flutter/core/providers/app_providers.dart';
+import 'package:podcast_merlin_flutter/core/services/widget_launch_service.dart';
 import 'package:podcast_merlin_flutter/core/utils/responsive.dart';
 import 'package:podcast_merlin_flutter/features/downloads/episode_download_service.dart';
 import 'package:podcast_merlin_flutter/features/player/audio_player_service.dart';
@@ -527,6 +528,121 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.byType(NavigationRail), findsOneWidget);
       expect(find.byType(NavigationBar), findsNothing);
+    });
+  });
+
+  group('Home widget launch opens NowPlayingSheet', () {
+    tearDown(() {
+      WidgetLaunchService.instance.consumeOverride = null;
+      NowPlayingSheet.isShowingForTesting = false;
+    });
+
+    Future<MerlinAudioHandler> startPlayback(WidgetTester tester) async {
+      late MerlinAudioHandler audioHandler;
+      await tester.runAsync(() async {
+        audioHandler = MerlinAudioHandler(db: db, urlLoader: (_) async {});
+        await audioHandler.playEpisode(const Episode(
+          id: 77,
+          podcastId: 1,
+          podcastRss: 'https://example.com/rss.xml',
+          guid: 'ep-widget-launch',
+          title: 'Widget Launch Episode',
+          description: '',
+          mediaUrl: 'https://example.com/widget.mp3',
+          duration: 1800,
+          position: 0,
+          imageUrl: '',
+        ));
+      });
+      addTearDown(audioHandler.dispose);
+      return audioHandler;
+    }
+
+    /// Simulates the native one-shot consume: returns [uri] once, then null.
+    void queueLaunch(String? uri) {
+      String? pending = uri;
+      WidgetLaunchService.instance.consumeOverride = () async {
+        final value = pending;
+        pending = null;
+        return value;
+      };
+    }
+
+    testWidgets('cold start from widget opens the sheet when an episode is active', (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      final audioHandler = await startPlayback(tester);
+      queueLaunch(WidgetLaunchService.nowPlayingUri);
+
+      await tester.pumpWidget(buildAppWithViewport(
+        child: const MainShell(),
+        size: const Size(360, 640),
+        audioHandler: audioHandler,
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NowPlayingSheet), findsOneWidget);
+    });
+
+    testWidgets('resume after attaching to a background engine opens the sheet once', (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      final audioHandler = await startPlayback(tester);
+      queueLaunch(null);
+
+      await tester.pumpWidget(buildAppWithViewport(
+        child: const MainShell(),
+        size: const Size(360, 640),
+        audioHandler: audioHandler,
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(NowPlayingSheet), findsNothing);
+
+      // Widget tapped: the activity is (re)created / receives a new intent, then resumes.
+      queueLaunch(WidgetLaunchService.nowPlayingUri);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.byType(NowPlayingSheet), findsOneWidget);
+
+      // Close and resume again (e.g. screen unlock): the consumed launch must not re-trigger.
+      Navigator.of(tester.element(find.byType(NowPlayingSheet))).pop();
+      await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.byType(NowPlayingSheet), findsNothing);
+
+      // Drain timers scheduled by the pause-triggered position flush.
+      await tester.pump(const Duration(seconds: 10));
+    });
+
+    testWidgets('widget launch without an active episode stays on the landing tab', (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      queueLaunch(WidgetLaunchService.nowPlayingUri);
+
+      await tester.pumpWidget(buildAppWithViewport(
+        child: const MainShell(),
+        size: const Size(360, 640),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NowPlayingSheet), findsNothing);
+      expect(find.byType(NavigationBar), findsOneWidget);
+    });
+
+    test('shouldOpenNowPlaying handles URIs', () {
+      expect(WidgetLaunchService.shouldOpenNowPlaying(null), isFalse);
+      expect(WidgetLaunchService.shouldOpenNowPlaying(''), isTrue);
+      expect(WidgetLaunchService.shouldOpenNowPlaying(WidgetLaunchService.nowPlayingUri), isTrue);
+      expect(WidgetLaunchService.shouldOpenNowPlaying('podcastmerlin://other'), isFalse);
     });
   });
 

@@ -8,6 +8,7 @@ import '../models/sync_status.dart';
 import '../models/app_settings.dart';
 import '../services/dopamine_video_service.dart';
 import '../services/image_cache_service.dart';
+import '../services/network_info_service.dart';
 import '../utils/error_formatter.dart';
 import '../../features/player/audio_player_service.dart';
 import '../../features/sync/gpodder_api_client.dart';
@@ -21,11 +22,13 @@ import 'app_settings_provider.dart';
 export '../models/app_settings.dart';
 export 'app_settings_provider.dart';
 export '../services/dopamine_video_service.dart';
+export '../services/network_info_service.dart';
 
 final databaseProvider = Provider<DatabaseHelper>((ref) => DatabaseHelper.instance);
 final secureStorageProvider = Provider<SecureStorageService>((ref) => SecureStorageService());
 final apiClientProvider = Provider<GPodderApiClient>((ref) => GPodderApiClient());
 final dopamineVideoServiceProvider = Provider<DopamineVideoService>((ref) => DopamineVideoService());
+final networkInfoServiceProvider = Provider<NetworkInfoService>((ref) => NetworkInfoService());
 
 final episodeDownloadServiceProvider = Provider<EpisodeDownloadService>((ref) {
   final service = EpisodeDownloadService(
@@ -69,11 +72,30 @@ final episodeDownloadServiceProvider = Provider<EpisodeDownloadService>((ref) {
 });
 
 final syncServiceProvider = Provider<SyncService>((ref) {
-  return SyncService(
+  final service = SyncService(
     apiClient: ref.watch(apiClientProvider),
     storage: ref.watch(secureStorageProvider),
     db: ref.watch(databaseProvider),
+    networkInfoService: ref.watch(networkInfoServiceProvider),
   );
+  final initialSettings = ref.read(appSettingsProvider);
+  service.updateNetworkConstraints(
+    networkMode: initialSettings.gpodderNetworkMode,
+    allowedSsid: initialSettings.gpodderAllowedSsid,
+    allowEthernet: initialSettings.gpodderAllowEthernet,
+  );
+  ref.listen<AppSettings>(appSettingsProvider, (previous, next) {
+    if (previous?.gpodderNetworkMode != next.gpodderNetworkMode ||
+        previous?.gpodderAllowedSsid != next.gpodderAllowedSsid ||
+        previous?.gpodderAllowEthernet != next.gpodderAllowEthernet) {
+      service.updateNetworkConstraints(
+        networkMode: next.gpodderNetworkMode,
+        allowedSsid: next.gpodderAllowedSsid,
+        allowEthernet: next.gpodderAllowEthernet,
+      );
+    }
+  });
+  return service;
 });
 
 class SyncStatusNotifier extends StateNotifier<SyncStatusState> {
@@ -104,6 +126,7 @@ class SyncStatusNotifier extends StateNotifier<SyncStatusState> {
         forceFullResync: forceFullResync,
         requireGpodder: requireGpodder,
         onProgress: (stage, detail) {
+          if (!mounted) return;
           state = SyncStatusState(
             isSyncing: true,
             stage: stage,
@@ -111,6 +134,7 @@ class SyncStatusNotifier extends StateNotifier<SyncStatusState> {
           );
         },
       );
+      if (!mounted) return success;
       state = SyncStatusState(
         isSyncing: false,
         stage: success ? SyncStage.completed : SyncStage.error,
@@ -120,6 +144,7 @@ class SyncStatusNotifier extends StateNotifier<SyncStatusState> {
       );
       return success;
     } catch (e) {
+      if (!mounted) return false;
       state = SyncStatusState(
         isSyncing: false,
         stage: SyncStage.error,

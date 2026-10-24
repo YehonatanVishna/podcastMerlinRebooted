@@ -22,9 +22,11 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   final _userController = TextEditingController();
   final _passwordController = TextEditingController();
   final _deviceIdController = TextEditingController();
+  final _ssidController = TextEditingController();
 
   bool _isLoading = true;
   bool _isTesting = false;
+  bool _isDetectingSsid = false;
   String? _statusMessage;
   bool _isSuccessStatus = false;
   int? _imageCacheBytes;
@@ -49,6 +51,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     _userController.text = await storage.read(SecureStorageService.keyUsername) ?? '';
     _passwordController.text = await storage.read(SecureStorageService.keyPassword) ?? '';
     _deviceIdController.text = settings.deviceId;
+    _ssidController.text = settings.gpodderAllowedSsid;
 
     _refreshImageCacheSize();
     ref.invalidate(downloadStorageUsageBytesProvider);
@@ -79,6 +82,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     _userController.dispose();
     _passwordController.dispose();
     _deviceIdController.dispose();
+    _ssidController.dispose();
     super.dispose();
   }
 
@@ -209,6 +213,40 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Settings saved successfully')),
       );
+    }
+  }
+
+  Future<void> _detectCurrentSsid() async {
+    setState(() => _isDetectingSsid = true);
+    try {
+      final netService = ref.read(networkInfoServiceProvider);
+      final ssid = await netService.getCurrentWifiSsid(requestPermissionIfNeeded: true);
+      if (!mounted) return;
+      if (ssid != null && ssid.isNotEmpty) {
+        _ssidController.text = ssid;
+        ref.read(appSettingsProvider.notifier).setGpodderAllowedSsid(ssid);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Detected Wi-Fi network: "$ssid"')),
+        );
+      } else {
+        final isGpsOn = await netService.isLocationServiceEnabled();
+        if (!mounted) return;
+        String message = 'Could not detect Wi-Fi network name. Please enter SSID manually or grant Location permission if prompted.';
+        if (!isGpsOn) {
+          message = 'Could not detect Wi-Fi name because Location Services (GPS) is turned OFF on your device. Please turn ON Location in quick settings and try again.';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to detect Wi-Fi: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isDetectingSsid = false);
     }
   }
 
@@ -698,6 +736,13 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           subtitle: const Text('Trim conversational pauses dynamically without pitch change'),
                           value: settings.skipSilence,
                           onChanged: (val) => settingsNotifier.setSkipSilence(val),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Normalize Audio Pitch'),
+                          subtitle: const Text('Keep voice pitch natural when changing speed (disable for lower pitch at slow speeds and higher pitch at fast speeds)'),
+                          value: settings.normalizePitch,
+                          onChanged: (val) => settingsNotifier.setNormalizePitch(val),
                         ),
                         const Divider(height: 24),
                         SwitchListTile(
@@ -1281,6 +1326,93 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           value: settings.syncOnLaunch,
                           onChanged: (val) => settingsNotifier.setSyncOnLaunch(val),
                         ),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Network Restrictions',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<GpodderNetworkRestrictionMode>(
+                          isExpanded: true,
+                          initialValue: settings.gpodderNetworkMode,
+                          decoration: const InputDecoration(
+                            labelText: 'gPodder Sync Allowed Networks',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.wifi_lock),
+                            helperText: 'Restrict gPodder sync to prevent timeouts on other networks',
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: GpodderNetworkRestrictionMode.anyNetwork,
+                              child: Text('Any Network (Wi-Fi, Ethernet, Mobile Data)'),
+                            ),
+                            DropdownMenuItem(
+                              value: GpodderNetworkRestrictionMode.wifiOrEthernetOnly,
+                              child: Text('Wi-Fi or Ethernet Only (Skip Mobile Data)'),
+                            ),
+                            DropdownMenuItem(
+                              value: GpodderNetworkRestrictionMode.specificWifiSsid,
+                              child: Text('Specific Wi-Fi Network (SSID) Only'),
+                            ),
+                          ],
+                          onChanged: (val) async {
+                            if (val != null) {
+                              settingsNotifier.setGpodderNetworkMode(val);
+                              if (val == GpodderNetworkRestrictionMode.specificWifiSsid) {
+                                final netService = ref.read(networkInfoServiceProvider);
+                                await netService.requestPermissionIfNeeded();
+                              }
+                            }
+                          },
+                        ),
+                        if (settings.gpodderNetworkMode == GpodderNetworkRestrictionMode.specificWifiSsid) ...[
+                          const SizedBox(height: 12),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _ssidController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Allowed Wi-Fi SSID / Network Name',
+                                    hintText: 'e.g. MyHomeNetwork',
+                                    border: OutlineInputBorder(),
+                                    prefixIcon: Icon(Icons.wifi),
+                                    helperText: 'Sync connects only when connected to this Wi-Fi name (requires Location permission on Android)',
+                                  ),
+                                  onChanged: (val) {
+                                    settingsNotifier.setGpodderAllowedSsid(val);
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4.0),
+                                child: OutlinedButton.icon(
+                                  onPressed: _isDetectingSsid ? null : _detectCurrentSsid,
+                                  icon: _isDetectingSsid
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.my_location),
+                                  label: const Text('Use Current Wi-Fi'),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Also allow on Wired Ethernet'),
+                            subtitle: const Text('Allow sync when connected via LAN cable (e.g. docked on home network)'),
+                            value: settings.gpodderAllowEthernet,
+                            onChanged: (val) => settingsNotifier.setGpodderAllowEthernet(val),
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         const Divider(),
                         const SizedBox(height: 8),

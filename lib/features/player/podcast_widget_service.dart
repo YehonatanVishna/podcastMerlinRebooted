@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'package:audio_service/audio_service.dart';
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart' show Color;
+import 'package:flutter/material.dart' show Brightness, Color, ColorScheme;
 import 'package:home_widget/home_widget.dart';
+import '../../core/models/app_settings.dart';
 import '../../core/services/image_cache_service.dart';
+import '../../core/theme/app_theme.dart';
 
 /// Service managing synchronization between Podcast Merlin playback state
 /// and the Android home screen player widget.
@@ -113,6 +116,77 @@ class PodcastWidgetService {
   }
 
   /// Updates the home screen widget theme colors based on the app's active color scheme.
+  /// Computes the widget's theme colors from [settings], mirroring the dark theme built
+  /// in `PodcastMerlinApp`.
+  ///
+  /// [dynamicDark] is the (un-harmonized) dark Material You scheme; it is ignored unless
+  /// `settings.useDynamicColor` is enabled. The surface color is `null` whenever dynamic
+  /// colors or AMOLED mode are active so Android 12+ natively applies the
+  /// `system_accent2_800` wallpaper-tinted background (matching e.g. the YouTube widget)
+  /// instead of a flat dark grey/black surface.
+  static ({Color primary, Color onPrimary, Color? surface}) resolveWidgetColors(
+    AppSettings settings, {
+    ColorScheme? dynamicDark,
+  }) {
+    final useDynamic = settings.useDynamicColor;
+    final isAmoled = settings.themeMode == AppThemeMode.amoled;
+    final scheme = useDynamic ? dynamicDark : null;
+    final seed = settings.accentColor.color;
+    final darkTheme = isAmoled
+        ? AppTheme.createAmoledTheme(scheme, seedColor: seed)
+        : AppTheme.createDarkTheme(scheme, seedColor: seed);
+    return (
+      primary: darkTheme.colorScheme.primary,
+      onPrimary: darkTheme.colorScheme.onPrimary,
+      surface: (useDynamic || isAmoled) ? null : darkTheme.colorScheme.surfaceContainer,
+    );
+  }
+
+  /// Resolves the platform's dark Material You scheme the same way `DynamicColorBuilder`
+  /// does. Works headlessly (no Activity), e.g. when playback was started from the widget
+  /// and AudioService spun up the Flutter engine in the background.
+  @visibleForTesting
+  Future<ColorScheme?> Function() dynamicDarkResolver = _resolveDynamicDark;
+
+  static Future<ColorScheme?> _resolveDynamicDark() async {
+    try {
+      final corePalette = await DynamicColorPlugin.getCorePalette();
+      if (corePalette != null) {
+        return corePalette.toColorScheme(brightness: Brightness.dark);
+      }
+    } catch (_) {}
+    try {
+      final accent = await DynamicColorPlugin.getAccentColor();
+      if (accent != null) {
+        return ColorScheme.fromSeed(seedColor: accent, brightness: Brightness.dark);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  int _themeSyncGeneration = 0;
+
+  /// Pushes the widget theme colors derived from [settings] without depending on the
+  /// widget tree being built. The UI tree doesn't render frames while the engine runs
+  /// headlessly, so relying solely on post-frame callbacks left the widget with the
+  /// default purple theme until the app was opened.
+  Future<void> syncThemeWithSettings(AppSettings settings, {ColorScheme? dynamicDark}) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    final generation = ++_themeSyncGeneration;
+    var scheme = dynamicDark;
+    if (settings.useDynamicColor && scheme == null) {
+      scheme = await dynamicDarkResolver();
+      // A newer sync was requested while resolving; let it win.
+      if (generation != _themeSyncGeneration) return;
+    }
+    final colors = resolveWidgetColors(settings, dynamicDark: scheme);
+    await updateThemeColors(
+      primaryColor: colors.primary,
+      onPrimaryColor: colors.onPrimary,
+      surfaceColor: colors.surface,
+    );
+  }
+
   Future<void> updateThemeColors({
     required Color primaryColor,
     required Color onPrimaryColor,
