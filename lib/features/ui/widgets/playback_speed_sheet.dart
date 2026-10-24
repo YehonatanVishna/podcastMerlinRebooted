@@ -140,6 +140,22 @@ class PlaybackSpeedSheet extends ConsumerWidget {
                     }).toList(),
                   ),
                   const SizedBox(height: 16),
+                  const Divider(height: 24),
+                  Consumer(
+                    builder: (context, ref, _) {
+                      final settings = ref.watch(appSettingsProvider);
+                      final settingsNotifier = ref.read(appSettingsProvider.notifier);
+                      return SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Normalize Audio Pitch'),
+                        subtitle: const Text('Keeps voice natural (disable for lower pitch at slow speeds and higher pitch at fast speeds)'),
+                        value: settings.normalizePitch,
+                        onChanged: (val) {
+                          settingsNotifier.setNormalizePitch(val);
+                        },
+                      );
+                    },
+                  ),
                 ],
               ),
             ),

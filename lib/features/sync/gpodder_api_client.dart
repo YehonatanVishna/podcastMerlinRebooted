@@ -101,6 +101,7 @@ class GPodderApiClient {
       final response = await _dio.get(
         '$baseUrl/subscriptions?since=2147483647',
         options: _getAuthOptions(username, password).copyWith(
+          connectTimeout: const Duration(seconds: 8),
           sendTimeout: const Duration(seconds: 15),
           receiveTimeout: const Duration(seconds: 15),
         ),

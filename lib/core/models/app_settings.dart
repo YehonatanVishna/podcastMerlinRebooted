@@ -91,6 +91,15 @@ enum SyncConflictPolicy {
   const SyncConflictPolicy(this.label);
 }
 
+enum GpodderNetworkRestrictionMode {
+  anyNetwork('Any Network'),
+  wifiOrEthernetOnly('Wi-Fi / Ethernet Only'),
+  specificWifiSsid('Specific Wi-Fi SSID Only');
+
+  final String label;
+  const GpodderNetworkRestrictionMode(this.label);
+}
+
 enum DopamineVisualType {
   proceduralTunnel('Neon Warp Tunnel'),
   customVideo('Custom Video');
@@ -167,6 +176,7 @@ class AppSettings {
 
   // Playback & Audio
   final double defaultPlaybackSpeed;
+  final bool normalizePitch;
   final bool autoAdvanceQueue;
   final int markAsPlayedThresholdSeconds;
   final AutoFocusLossAction audioFocusLossAction;
@@ -193,6 +203,9 @@ class AppSettings {
   final bool syncOnLaunch;
   final int periodicSyncIntervalMinutes;
   final SyncConflictPolicy syncConflictPolicy;
+  final GpodderNetworkRestrictionMode gpodderNetworkMode;
+  final String gpodderAllowedSsid;
+  final bool gpodderAllowEthernet;
   final String deviceId;
 
   const AppSettings({
@@ -208,6 +221,7 @@ class AppSettings {
     this.dopamineCustomVideos = const [],
     this.selectedCustomVideoId,
     this.defaultPlaybackSpeed = 1.0,
+    this.normalizePitch = true,
     this.autoAdvanceQueue = true,
     this.markAsPlayedThresholdSeconds = 60,
     this.audioFocusLossAction = AutoFocusLossAction.pauseAndResume,
@@ -226,6 +240,9 @@ class AppSettings {
     this.syncOnLaunch = true,
     this.periodicSyncIntervalMinutes = 180,
     this.syncConflictPolicy = SyncConflictPolicy.furthestPosition,
+    this.gpodderNetworkMode = GpodderNetworkRestrictionMode.anyNetwork,
+    this.gpodderAllowedSsid = '',
+    this.gpodderAllowEthernet = true,
     this.deviceId = 'podcast_merlin_flutter',
   });
 
@@ -243,6 +260,7 @@ class AppSettings {
     String? selectedCustomVideoId,
     bool clearSelectedCustomVideo = false,
     double? defaultPlaybackSpeed,
+    bool? normalizePitch,
     bool? autoAdvanceQueue,
     int? markAsPlayedThresholdSeconds,
     AutoFocusLossAction? audioFocusLossAction,
@@ -262,6 +280,9 @@ class AppSettings {
     bool? syncOnLaunch,
     int? periodicSyncIntervalMinutes,
     SyncConflictPolicy? syncConflictPolicy,
+    GpodderNetworkRestrictionMode? gpodderNetworkMode,
+    String? gpodderAllowedSsid,
+    bool? gpodderAllowEthernet,
     String? deviceId,
   }) {
     AutoDeletePlayedPolicy resolvedPolicy = autoDeletePlayed ?? this.autoDeletePlayed;
@@ -291,6 +312,7 @@ class AppSettings {
           ? null
           : (selectedCustomVideoId ?? this.selectedCustomVideoId),
       defaultPlaybackSpeed: defaultPlaybackSpeed ?? this.defaultPlaybackSpeed,
+      normalizePitch: normalizePitch ?? this.normalizePitch,
       autoAdvanceQueue: autoAdvanceQueue ?? this.autoAdvanceQueue,
       markAsPlayedThresholdSeconds: markAsPlayedThresholdSeconds ?? this.markAsPlayedThresholdSeconds,
       audioFocusLossAction: audioFocusLossAction ?? this.audioFocusLossAction,
@@ -309,6 +331,9 @@ class AppSettings {
       syncOnLaunch: syncOnLaunch ?? this.syncOnLaunch,
       periodicSyncIntervalMinutes: periodicSyncIntervalMinutes ?? this.periodicSyncIntervalMinutes,
       syncConflictPolicy: syncConflictPolicy ?? this.syncConflictPolicy,
+      gpodderNetworkMode: gpodderNetworkMode ?? this.gpodderNetworkMode,
+      gpodderAllowedSsid: gpodderAllowedSsid ?? this.gpodderAllowedSsid,
+      gpodderAllowEthernet: gpodderAllowEthernet ?? this.gpodderAllowEthernet,
       deviceId: deviceId ?? this.deviceId,
     );
   }
@@ -327,6 +352,7 @@ class AppSettings {
       'dopamineCustomVideos': dopamineCustomVideos.map((v) => v.toJson()).toList(),
       'selectedCustomVideoId': selectedCustomVideoId,
       'defaultPlaybackSpeed': defaultPlaybackSpeed,
+      'normalizePitch': normalizePitch,
       'autoAdvanceQueue': autoAdvanceQueue,
       'markAsPlayedThresholdSeconds': markAsPlayedThresholdSeconds,
       'audioFocusLossAction': audioFocusLossAction.name,
@@ -345,6 +371,9 @@ class AppSettings {
       'syncOnLaunch': syncOnLaunch,
       'periodicSyncIntervalMinutes': periodicSyncIntervalMinutes,
       'syncConflictPolicy': syncConflictPolicy.name,
+      'gpodderNetworkMode': gpodderNetworkMode.name,
+      'gpodderAllowedSsid': gpodderAllowedSsid,
+      'gpodderAllowEthernet': gpodderAllowEthernet,
       'deviceId': deviceId,
     };
   }
@@ -397,6 +426,16 @@ class AppSettings {
         return SyncConflictPolicy.values.firstWhere((e) => e.name == val, orElse: () => SyncConflictPolicy.furthestPosition);
       }
       return SyncConflictPolicy.furthestPosition;
+    }
+
+    GpodderNetworkRestrictionMode parseGpodderNetworkMode(dynamic val) {
+      if (val is String) {
+        return GpodderNetworkRestrictionMode.values.firstWhere(
+          (e) => e.name == val,
+          orElse: () => GpodderNetworkRestrictionMode.anyNetwork,
+        );
+      }
+      return GpodderNetworkRestrictionMode.anyNetwork;
     }
 
     DopamineVisualType parseDopamineVisual(dynamic val) {
@@ -475,6 +514,7 @@ class AppSettings {
       dopamineCustomVideos: parseCustomVideos(json['dopamineCustomVideos']),
       selectedCustomVideoId: parseNullableString(json['selectedCustomVideoId']),
       defaultPlaybackSpeed: parseDouble(json['defaultPlaybackSpeed'], 1.0),
+      normalizePitch: parseBool(json['normalizePitch'], true),
       autoAdvanceQueue: parseBool(json['autoAdvanceQueue'], true),
       markAsPlayedThresholdSeconds: parseInt(json['markAsPlayedThresholdSeconds'], 60),
       audioFocusLossAction: parseFocus(json['audioFocusLossAction']),
@@ -493,6 +533,9 @@ class AppSettings {
       syncOnLaunch: parseBool(json['syncOnLaunch'], true),
       periodicSyncIntervalMinutes: parseInt(json['periodicSyncIntervalMinutes'], 180),
       syncConflictPolicy: parseSyncConflict(json['syncConflictPolicy']),
+      gpodderNetworkMode: parseGpodderNetworkMode(json['gpodderNetworkMode']),
+      gpodderAllowedSsid: parseString(json['gpodderAllowedSsid'], ''),
+      gpodderAllowEthernet: parseBool(json['gpodderAllowEthernet'], true),
       deviceId: parseString(json['deviceId'], 'podcast_merlin_flutter'),
     );
   }

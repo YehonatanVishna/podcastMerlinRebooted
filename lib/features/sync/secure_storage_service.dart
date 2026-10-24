@@ -6,7 +6,13 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 class SecureStorageService {
-  static const _secureStorage = FlutterSecureStorage();
+  static const _secureStorage = FlutterSecureStorage(
+    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+  );
+
+  static bool _hasLoggedWriteError = false;
+  static bool _hasLoggedReadError = false;
+  static bool _keychainDisabled = false;
 
   static const String keyServerUrl = 'nextcloud_server_url';
   static const String keyUsername = 'nextcloud_username';
@@ -20,32 +26,47 @@ class SecureStorageService {
   static const String keyUseDynamicColor = 'app_use_dynamic_color';
 
   Future<void> write(String key, String value) async {
-    try {
-      await _secureStorage.write(key: key, value: value);
-      _memoryFallback[key] = value;
-      await _deleteFallback(key);
-    } catch (e) {
-      if (kDebugMode) print('SecureStorage write error, using fallback: $e');
-      await _writeFallback(key, value);
+    if (!_keychainDisabled) {
+      try {
+        await _secureStorage.write(key: key, value: value);
+        _memoryFallback[key] = value;
+        await _deleteFallback(key);
+        return;
+      } catch (e) {
+        _keychainDisabled = true;
+        if (kDebugMode && !_hasLoggedWriteError) {
+          _hasLoggedWriteError = true;
+          debugPrint('SecureStorage unavailable, using local fallback store (further errors suppressed): $e');
+        }
+      }
     }
+    await _writeFallback(key, value);
   }
 
   Future<String?> read(String key) async {
-    try {
-      final value = await _secureStorage.read(key: key);
-      if (value != null && value.isNotEmpty) {
-        return value;
+    if (!_keychainDisabled) {
+      try {
+        final value = await _secureStorage.read(key: key);
+        if (value != null && value.isNotEmpty) {
+          return value;
+        }
+      } catch (e) {
+        _keychainDisabled = true;
+        if (kDebugMode && !_hasLoggedReadError) {
+          _hasLoggedReadError = true;
+          debugPrint('SecureStorage unavailable, checking local fallback store (further errors suppressed): $e');
+        }
       }
-    } catch (e) {
-      if (kDebugMode) print('SecureStorage read error, checking fallback: $e');
     }
     return await _readFallback(key);
   }
 
   Future<void> delete(String key) async {
-    try {
-      await _secureStorage.delete(key: key);
-    } catch (_) {}
+    if (!_keychainDisabled) {
+      try {
+        await _secureStorage.delete(key: key);
+      } catch (_) {}
+    }
     await _deleteFallback(key);
   }
 

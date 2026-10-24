@@ -17,30 +17,34 @@ void setupFfi() {
   } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
-    try {
-      JustAudioMediaKit.protocolWhitelist = const [
-        'udp',
-        'rtp',
-        'tcp',
-        'tls',
-        'data',
-        'file',
-        'http',
-        'https',
-        'crypto',
-        'cache',
-        'pipe',
-        'fd',
-        'concat',
-      ];
-      JustAudioMediaKit.ensureInitialized();
-      MediaKit.ensureInitialized();
-      audioBackendInitError = null;
-    } catch (e) {
-      audioBackendInitError = e.toString();
-      // ignore: avoid_print
-      print('JustAudioMediaKit initialization error: $e');
+    if (Platform.isLinux || Platform.isWindows) {
+      try {
+        JustAudioMediaKit.protocolWhitelist = const [
+          'udp',
+          'rtp',
+          'tcp',
+          'tls',
+          'data',
+          'file',
+          'http',
+          'https',
+          'crypto',
+          'cache',
+          'pipe',
+          'fd',
+          'concat',
+        ];
+        JustAudioMediaKit.ensureInitialized();
+        audioBackendInitError = null;
+      } catch (e) {
+        audioBackendInitError = e.toString();
+        // ignore: avoid_print
+        print('JustAudioMediaKit initialization error: $e');
+      }
     }
+    try {
+      MediaKit.ensureInitialized();
+    } catch (_) {}
   }
 }
 
