@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
+import androidx.media3.common.C
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
@@ -49,10 +50,11 @@ class MainActivity : AudioServiceActivity() {
             val playersField = handler.javaClass.getDeclaredField("players").apply { isAccessible = true }
             val playersMap = playersField.get(handler) as? Map<*, *> ?: return
 
-            val targetMode = if (normalize) {
-                AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
-            } else {
-                AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
+            if (playersMap.isEmpty()) {
+                mainHandler.postDelayed({
+                    applyPitchNormalization(shouldNormalizePitch, currentTargetSpeed)
+                }, 500)
+                return
             }
 
             for (audioPlayerObj in playersMap.values) {
@@ -60,17 +62,25 @@ class MainActivity : AudioServiceActivity() {
                 val playerField = audioPlayerObj.javaClass.getDeclaredField("player").apply { isAccessible = true }
                 val exoPlayer = playerField.get(audioPlayerObj) as? ExoPlayer ?: continue
 
+                // Completely disable hardware Audio Offload. Audio offload on Android hardware DSPs
+                // causes silent playback buffer starvation after a few minutes, while position continues ticking.
+                // Disabling offload routes audio through standard software/MediaCodec and PCM AudioTrack,
+                // ensuring stable background streaming and reliable SonicAudioProcessor pitch/speed scaling.
                 val currentParams = exoPlayer.trackSelectionParameters
                 val updatedParams = currentParams.buildUpon()
                     .setAudioOffloadPreferences(
                         AudioOffloadPreferences.Builder()
-                            .setAudioOffloadMode(targetMode)
+                            .setAudioOffloadMode(AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED)
                             .setIsSpeedChangeSupportRequired(true)
                             .setIsGaplessSupportRequired(true)
                             .build()
                     )
                     .build()
                 exoPlayer.trackSelectionParameters = updatedParams
+
+                // Hold both CPU WakeLock and Wi-Fi lock during active playback and network streaming
+                // to prevent Android Doze mode and Wi-Fi radio power-save from starving network chunks.
+                exoPlayer.setWakeMode(C.WAKE_MODE_NETWORK)
 
                 val effectiveSpeed = if (currentTargetSpeed > 0f) currentTargetSpeed else exoPlayer.playbackParameters.speed
                 val targetPitch = if (normalize) 1.0f else effectiveSpeed
@@ -246,6 +256,7 @@ class MainActivity : AudioServiceActivity() {
                 result.notImplemented()
             }
         }
+        applyPitchNormalization(shouldNormalizePitch, currentTargetSpeed)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, networkChannel).setMethodCallHandler { call, result ->
             if (call.method == "getNetworkInfo") {
                 registerWifiCallbackIfNeeded()

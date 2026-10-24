@@ -378,6 +378,8 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       _becomingNoisySub = session.becomingNoisyEventStream.listen((_) async {
         await pause();
       });
+
+      await _applyPitch();
     } catch (e) {
       if (kDebugMode) print('AudioSession initialization error: $e');
     }
