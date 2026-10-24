@@ -291,24 +291,24 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
         setWebAudioPreservesPitch(normalizePitch);
         return;
       }
-      if (Platform.isMacOS || Platform.isIOS) {
+      if (Platform.isMacOS || Platform.isIOS || Platform.isAndroid) {
         try {
           const channel = MethodChannel('com.podcastmerlin.app/audio_pitch');
-          await channel.invokeMethod('setNormalizePitch', {'normalize': normalizePitch});
+          await channel.invokeMethod('setNormalizePitch', {
+            'normalize': normalizePitch,
+            'speed': _speed,
+          });
         } catch (e) {
           if (kDebugMode) print('Failed to set native pitch normalization: $e');
         }
       }
       if (urlLoader == null) {
-        // Use the player's effective speed rather than [_speed] so a failed
-        // setSpeed call cannot leave pitch and speed out of sync. On Android
-        // just_audio keeps both values in a single PlaybackParameters object,
-        // so this must always be re-applied after the speed changes.
-        final effectiveSpeed = _player.speed;
+        // Use the handler's active speed rather than [_player.speed] to ensure
+        // pitch and speed stay aligned, and apply directly without skipping so
+        // native audio processors and ExoPlayer instances update reliably.
+        final effectiveSpeed = _speed;
         final targetPitch = normalizePitch ? 1.0 : effectiveSpeed;
-        if ((_player.pitch - targetPitch).abs() > 0.001) {
-          await _player.setPitch(targetPitch);
-        }
+        await _player.setPitch(targetPitch);
       }
     } catch (e) {
       // Never break playback if pitch shifting is unsupported, but surface the

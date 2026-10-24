@@ -14,7 +14,12 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.TrackSelectionParameters
+import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
+import androidx.media3.exoplayer.ExoPlayer
 import com.ryanheise.audioservice.AudioServiceActivity
+import com.ryanheise.just_audio.JustAudioPlugin
 import es.antonborri.home_widget.HomeWidgetLaunchIntent
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -27,6 +32,52 @@ class MainActivity : AudioServiceActivity() {
 
     private val networkChannel = "com.podcastmerlin.app/network"
     private val launchChannel = "com.podcastmerlin.app/launch"
+    private val pitchChannel = "com.podcastmerlin.app/audio_pitch"
+
+    private var shouldNormalizePitch: Boolean = true
+    private var currentTargetSpeed: Float = 1.0f
+
+    private fun applyPitchNormalization(normalize: Boolean, speed: Float? = null) {
+        shouldNormalizePitch = normalize
+        if (speed != null && speed > 0f) {
+            currentTargetSpeed = speed
+        }
+        try {
+            val plugin = flutterEngine?.plugins?.get(JustAudioPlugin::class.java) as? JustAudioPlugin ?: return
+            val handlerField = plugin.javaClass.getDeclaredField("methodCallHandler").apply { isAccessible = true }
+            val handler = handlerField.get(plugin) ?: return
+            val playersField = handler.javaClass.getDeclaredField("players").apply { isAccessible = true }
+            val playersMap = playersField.get(handler) as? Map<*, *> ?: return
+
+            val targetMode = if (normalize) {
+                AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
+            } else {
+                AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
+            }
+
+            for (audioPlayerObj in playersMap.values) {
+                if (audioPlayerObj == null) continue
+                val playerField = audioPlayerObj.javaClass.getDeclaredField("player").apply { isAccessible = true }
+                val exoPlayer = playerField.get(audioPlayerObj) as? ExoPlayer ?: continue
+
+                val currentParams = exoPlayer.trackSelectionParameters
+                val updatedParams = currentParams.buildUpon()
+                    .setAudioOffloadPreferences(
+                        AudioOffloadPreferences.Builder()
+                            .setAudioOffloadMode(targetMode)
+                            .setIsSpeedChangeSupportRequired(true)
+                            .setIsGaplessSupportRequired(true)
+                            .build()
+                    )
+                    .build()
+                exoPlayer.trackSelectionParameters = updatedParams
+
+                val effectiveSpeed = if (currentTargetSpeed > 0f) currentTargetSpeed else exoPlayer.playbackParameters.speed
+                val targetPitch = if (normalize) 1.0f else effectiveSpeed
+                exoPlayer.playbackParameters = PlaybackParameters(effectiveSpeed, targetPitch)
+            }
+        } catch (_: Exception) {}
+    }
 
     @Volatile
     private var currentWifiSsid: String? = null
@@ -181,6 +232,16 @@ class MainActivity : AudioServiceActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, launchChannel).setMethodCallHandler { call, result ->
             if (call.method == "consumeWidgetLaunch") {
                 result.success(consumeWidgetLaunch())
+            } else {
+                result.notImplemented()
+            }
+        }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pitchChannel).setMethodCallHandler { call, result ->
+            if (call.method == "setNormalizePitch") {
+                val normalize = call.argument<Boolean>("normalize") ?: true
+                val speed = (call.argument<Double>("speed") ?: call.argument<Number>("speed")?.toDouble())?.toFloat()
+                applyPitchNormalization(normalize, speed)
+                result.success(null)
             } else {
                 result.notImplemented()
             }

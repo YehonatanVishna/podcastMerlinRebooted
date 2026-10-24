@@ -14,12 +14,12 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
+    <!-- Cleartext traffic is required to support podcast RSS feeds and media enclosure streaming from legacy HTTP servers -->
     <application
         android:label="Podcast Merlin"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        <!-- Cleartext traffic is required to support podcast RSS feeds and media enclosure streaming from legacy HTTP servers -->
         android:usesCleartextTraffic="true"
         android:allowBackup="false">
         <activity
