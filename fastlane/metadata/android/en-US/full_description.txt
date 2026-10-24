@@ -1,0 +1,15 @@
+<p><b>Podcast Merlin</b> is a modern, cross-platform podcast client designed for seamless playback and synchronized podcast listening across devices, with native support for Nextcloud Podcast and gPodder.net synchronization.</p>
+
+<p><b>Features:</b></p>
+<ul>
+  <li><b>Nextcloud &amp; gPodder Sync:</b> Full bi-directional synchronization of podcast subscriptions, episode playback states, and position timestamps with offline queuing and collision resolution.</li>
+  <li><b>Up Next Queue:</b> Interactive, persistent playback queue with drag-and-drop reordering, swipe removal, and continuous playback across shows.</li>
+  <li><b>Sleep Timer:</b> Flexible sleep timer with quick presets (5m to 60m), countdown badge, end-of-episode mode, and gentle audio fade-out.</li>
+  <li><b>Variable Speed &amp; Pitch Normalization:</b> Fine-grained playback speed (0.5x to 3.0x in 0.1x steps) with pitch scaling toggle and customizable skip intervals.</li>
+  <li><b>Resilient Episode Downloads:</b> Episode download manager with automatic pause/resume on network switches, storage quota limits, and automatic cleanup policies.</li>
+  <li><b>Network Gating:</b> Configurable sync rules to restrict cloud syncing to Wi-Fi/Ethernet or specific home Wi-Fi SSIDs.</li>
+  <li><b>Home Screen Widget:</b> Native Android home screen widget with one-tap Now Playing launch and dynamic Material You theme synchronization.</li>
+  <li><b>In-Car &amp; Bluetooth Audio:</b> Audio focus handling designed for Bluetooth car audio systems with interruption recovery and Smart Resume.</li>
+  <li><b>Search &amp; Discovery:</b> Search and subscribe to podcasts using Apple Podcasts or direct RSS feed URLs, plus OPML import/export.</li>
+  <li><b>Privacy &amp; Open Source:</b> No third-party trackers, no analytics, no proprietary SDKs, and 100% open source under AGPL-3.0.</li>
+</ul>

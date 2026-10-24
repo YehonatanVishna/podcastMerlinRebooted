@@ -1,0 +1,9 @@
+Initial release of Podcast Merlin (v0.1.0):
+- Bi-directional Nextcloud and gPodder sync
+- Interactive Up Next playback queue with drag-and-drop reordering
+- Resilient episode download manager with storage quota controls
+- Configurable sleep timer with gentle audio fade-out
+- Variable playback speed (0.5x–3.0x) and pitch normalization
+- Android home screen player widget with theme sync
+- Bluetooth audio focus recovery and smart resume
+- OPML import and export support
