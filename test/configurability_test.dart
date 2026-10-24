@@ -33,12 +33,21 @@ class MockSecureStorage extends SecureStorageService {
 
 class MockNetworkInfoService extends NetworkInfoService {
   NetworkConnectionInfo infoToReturn;
+  bool requestPermissionCalled = false;
+  bool gpsEnabled = true;
+
   MockNetworkInfoService([this.infoToReturn = const NetworkConnectionInfo()]);
 
   @override
   Future<NetworkConnectionInfo> getNetworkInfo({bool requestPermission = false}) async {
+    if (requestPermission) {
+      requestPermissionCalled = true;
+    }
     return infoToReturn;
   }
+
+  @override
+  Future<bool> isLocationServiceEnabled() async => gpsEnabled;
 }
 
 class MockGPodderApiClient extends GPodderApiClient {
@@ -828,6 +837,26 @@ void main() {
         allowedSsid: 'Home-Fiber-5G',
       );
       expect(noSsidRes.allowed, isFalse);
+
+      // Connected to Wi-Fi but SSID unavailable (e.g. Android permissions/location)
+      final wifiNoSsidNet = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isWifi: true, ssid: null),
+      );
+      final wifiNoSsidRes = await wifiNoSsidNet.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: 'Home-Fiber-5G',
+      );
+      expect(wifiNoSsidRes.allowed, isFalse);
+      expect(wifiNoSsidRes.reason, contains('Location'));
+
+      // Connected to Wi-Fi but GPS disabled
+      wifiNoSsidNet.gpsEnabled = false;
+      final gpsOffRes = await wifiNoSsidNet.checkGpodderAccess(
+        mode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: 'Home-Fiber-5G',
+      );
+      expect(gpsOffRes.allowed, isFalse);
+      expect(gpsOffRes.reason, contains('GPS'));
     });
 
     test('specificWifiSsid allows wired Ethernet when allowEthernet is true and blocks when false', () async {
@@ -958,6 +987,32 @@ void main() {
       final success = await syncService.performFullSync();
       expect(success, isTrue);
       expect(mockApi.pingCount, equals(1)); // Pinged server successfully over Ethernet!
+    });
+
+    test('performFullSync requests permission when specificWifiSsid is active', () async {
+      final mockStorage = MockSecureStorage();
+      await mockStorage.write(SecureStorageService.keyServerUrl, 'https://example.com/gpodder');
+      await mockStorage.write(SecureStorageService.keyUsername, 'merlin_user');
+      await mockStorage.write(SecureStorageService.keyPassword, 'secret_pass');
+
+      final mockApi = MockGPodderApiClient();
+      final mockNet = MockNetworkInfoService(
+        const NetworkConnectionInfo(isConnected: true, isWifi: true, ssid: 'HomeWifi'),
+      );
+
+      final syncService = SyncService(
+        apiClient: mockApi,
+        storage: mockStorage,
+        networkInfoService: mockNet,
+      );
+      syncService.updateNetworkConstraints(
+        networkMode: GpodderNetworkRestrictionMode.specificWifiSsid,
+        allowedSsid: 'HomeWifi',
+      );
+
+      final success = await syncService.performFullSync();
+      expect(success, isTrue);
+      expect(mockNet.requestPermissionCalled, isTrue);
     });
 
     test('audio_pitch method channel is called on setNormalizePitch', () async {

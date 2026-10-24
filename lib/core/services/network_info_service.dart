@@ -47,14 +47,32 @@ class NetworkInfoService {
     if (kIsWeb) return false;
     if (defaultTargetPlatform == TargetPlatform.android) {
       try {
-        final status = await Permission.locationWhenInUse.status;
-        if (!status.isGranted) {
-          final res = await Permission.locationWhenInUse.request();
-          return res.isGranted;
-        }
-        return true;
+        final locStatus = await Permission.locationWhenInUse.status;
+        if (locStatus.isGranted) return true;
+
+        final nearbyStatus = await Permission.nearbyWifiDevices.status;
+        if (nearbyStatus.isGranted) return true;
+
+        final res = await Permission.locationWhenInUse.request();
+        if (res.isGranted) return true;
+
+        final nearbyRes = await Permission.nearbyWifiDevices.request();
+        return nearbyRes.isGranted;
       } catch (_) {
         return false;
+      }
+    }
+    return true;
+  }
+
+  /// Checks if system-wide Location Service (GPS) is enabled on the device
+  Future<bool> isLocationServiceEnabled() async {
+    if (kIsWeb) return true;
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        return await Permission.location.serviceStatus.isEnabled;
+      } catch (_) {
+        return true;
       }
     }
     return true;
@@ -157,6 +175,19 @@ class NetworkInfoService {
 
       final current = cleanSsid(info.ssid);
       if (current.isEmpty) {
+        if (info.isWifi) {
+          final isGpsOn = await isLocationServiceEnabled();
+          if (!isGpsOn) {
+            return (
+              allowed: false,
+              reason: 'gPodder sync skipped: connected to Wi-Fi, but Location Services (GPS) is turned OFF in device settings. Android requires Location to be ON to verify Wi-Fi name (allowed: ${targets.join(', ')}).'
+            );
+          }
+          return (
+            allowed: false,
+            reason: 'gPodder sync skipped: connected to Wi-Fi, but could not detect Wi-Fi name (allowed: ${targets.join(', ')}). Please grant Location/Nearby devices permission in Android Settings.'
+          );
+        }
         return (
           allowed: false,
           reason: 'gPodder sync skipped: not connected to allowed Wi-Fi (allowed: ${targets.join(', ')})${allowEthernet ? ' or wired Ethernet' : ''}.'

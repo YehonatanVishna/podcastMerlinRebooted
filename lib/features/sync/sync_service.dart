@@ -50,7 +50,7 @@ class SyncService {
     if (allowEthernet != null) this.allowEthernet = allowEthernet;
   }
 
-  Future<({bool allowed, String? reason})> checkNetworkAllowed() async {
+  Future<({bool allowed, String? reason})> checkNetworkAllowed({bool requestPermission = false}) async {
     if (networkMode == GpodderNetworkRestrictionMode.anyNetwork && allowedSsid.isEmpty) {
       try {
         final settingsJson = await _storage.read('merlin_app_settings_v1');
@@ -67,6 +67,7 @@ class SyncService {
       mode: networkMode,
       allowedSsid: allowedSsid,
       allowEthernet: allowEthernet,
+      requestPermission: requestPermission,
     );
   }
 
@@ -102,9 +103,13 @@ class SyncService {
       return true;
     }
 
-    final netAccess = await checkNetworkAllowed();
+    final shouldRequestPerm = networkMode == GpodderNetworkRestrictionMode.specificWifiSsid;
+    final netAccess = await checkNetworkAllowed(requestPermission: shouldRequestPerm);
     if (!netAccess.allowed) {
-      final reason = netAccess.reason ?? 'Network not allowed for gPodder sync.';
+      final rawReason = netAccess.reason ?? 'Network not allowed for gPodder sync.';
+      final reason = rawReason.startsWith('gPodder sync skipped: ')
+          ? rawReason.substring('gPodder sync skipped: '.length)
+          : rawReason;
       if (requireGpodder || forceFullResync) {
         lastError = reason;
         return false;

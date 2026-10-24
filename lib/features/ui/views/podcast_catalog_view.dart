@@ -211,11 +211,13 @@ class _PodcastCatalogViewState extends ConsumerState<PodcastCatalogView> {
           ] else if (syncStatus.hasFeedWarnings) ...[
             SyncErrorBanner(
               isWarning: true,
-              title: 'Feed Sync Warnings',
+              title: syncStatus.feedWarnings.any((w) => w.toLowerCase().contains('gpodder'))
+                  ? 'Sync Notice'
+                  : 'Feed Sync Warnings',
               summary: syncStatus.feedWarnings.length == 1
-                  ? '1 podcast feed failed to sync'
-                  : '${syncStatus.feedWarnings.length} podcast feeds failed to sync',
-              errorMessage: 'Sync completed, but dead/failing podcast feed(s) were detected:\n${syncStatus.feedWarnings.join('\n')}',
+                  ? syncStatus.feedWarnings.first
+                  : '${syncStatus.feedWarnings.length} notices during sync',
+              errorMessage: syncStatus.feedWarnings.join('\n'),
               onDismiss: () => ref.read(syncStatusNotifierProvider.notifier).clearWarnings(),
               onRetry: () => ref.read(podcastsNotifierProvider.notifier).refreshAll(),
             ),

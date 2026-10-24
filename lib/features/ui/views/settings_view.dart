@@ -154,10 +154,14 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           SnackBar(content: Text('Detected Wi-Fi network: "$ssid"')),
         );
       } else {
+        final isGpsOn = await netService.isLocationServiceEnabled();
+        if (!mounted) return;
+        String message = 'Could not detect Wi-Fi network name. Please enter SSID manually or grant Location permission if prompted.';
+        if (!isGpsOn) {
+          message = 'Could not detect Wi-Fi name because Location Services (GPS) is turned OFF on your device. Please turn ON Location in quick settings and try again.';
+        }
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not detect Wi-Fi network name. Please enter SSID manually or grant Location permission if prompted.'),
-          ),
+          SnackBar(content: Text(message)),
         );
       }
     } catch (e) {
@@ -1272,9 +1276,13 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                               child: Text('Specific Wi-Fi Network (SSID) Only'),
                             ),
                           ],
-                          onChanged: (val) {
+                          onChanged: (val) async {
                             if (val != null) {
                               settingsNotifier.setGpodderNetworkMode(val);
+                              if (val == GpodderNetworkRestrictionMode.specificWifiSsid) {
+                                final netService = ref.read(networkInfoServiceProvider);
+                                await netService.requestPermissionIfNeeded();
+                              }
                             }
                           },
                         ),
@@ -1291,7 +1299,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                                     hintText: 'e.g. MyHomeNetwork',
                                     border: OutlineInputBorder(),
                                     prefixIcon: Icon(Icons.wifi),
-                                    helperText: 'Sync connects only when connected to this Wi-Fi name',
+                                    helperText: 'Sync connects only when connected to this Wi-Fi name (requires Location permission on Android)',
                                   ),
                                   onChanged: (val) {
                                     settingsNotifier.setGpodderAllowedSsid(val);
