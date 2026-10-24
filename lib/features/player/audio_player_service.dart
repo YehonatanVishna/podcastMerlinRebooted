@@ -69,6 +69,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   StreamSubscription? _interruptionSub;
   StreamSubscription? _becomingNoisySub;
   bool _wasPlayingBeforeInterruption = false;
+  bool _isInterrupted = false;
   int _playRequestId = 0;
 
   final Future<void> Function(String url)? urlLoader;
@@ -84,7 +85,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     this.urlLoader,
   })  : _db = db ?? DatabaseHelper.instance,
         _syncService = syncService ?? SyncService(),
-        _player = player ?? AudioPlayer() {
+        _player = player ?? AudioPlayer(handleInterruptions: false) {
     if (urlLoader == null) {
       _initAudioSession();
       _initPlayerListeners();
@@ -367,52 +368,94 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> _initAudioSession() async {
     try {
       final session = await AudioSession.instance;
-      await session.configure(const AudioSessionConfiguration.speech());
+      final pauseWhenDucked = audioFocusLossAction == AutoFocusLossAction.pauseAndResume;
+      await session.configure(AudioSessionConfiguration.speech().copyWith(
+        androidWillPauseWhenDucked: pauseWhenDucked,
+      ));
 
-      _interruptionSub = session.interruptionEventStream.listen((event) async {
-        if (event.begin) {
-          switch (event.type) {
-            case AudioInterruptionType.duck:
-              if (audioFocusLossAction == AutoFocusLossAction.duck) {
-                await _player.setVolume(0.5).catchError((_) {});
-              } else {
-                _wasPlayingBeforeInterruption = _player.playing;
-                await pause();
-              }
-              break;
-            case AudioInterruptionType.pause:
-            case AudioInterruptionType.unknown:
-              _wasPlayingBeforeInterruption = _player.playing;
-              await pause();
-              break;
-          }
-        } else {
-          switch (event.type) {
-            case AudioInterruptionType.duck:
-              if (audioFocusLossAction == AutoFocusLossAction.duck) {
-                await _player.setVolume(1.0).catchError((_) {});
-              } else {
-                if (_wasPlayingBeforeInterruption) {
-                  await play();
-                }
-              }
-              break;
-            case AudioInterruptionType.pause:
-              if (_wasPlayingBeforeInterruption) {
-                await play();
-              }
-              break;
-            case AudioInterruptionType.unknown:
-              break;
-          }
-        }
-      });
+      _interruptionSub = session.interruptionEventStream.listen(_handleInterruption);
 
       _becomingNoisySub = session.becomingNoisyEventStream.listen((_) async {
         await pause();
       });
     } catch (e) {
       if (kDebugMode) print('AudioSession initialization error: $e');
+    }
+  }
+
+  Future<void> _handleInterruption(AudioInterruptionEvent event) async {
+    if (event.begin) {
+      switch (event.type) {
+        case AudioInterruptionType.duck:
+          if (audioFocusLossAction == AutoFocusLossAction.duck) {
+            await _player.setVolume(0.5).catchError((_) {});
+          } else {
+            if (!_isInterrupted) {
+              _wasPlayingBeforeInterruption = _player.playing || playbackState.value.playing;
+              _isInterrupted = true;
+            }
+            await pause();
+          }
+          break;
+        case AudioInterruptionType.pause:
+        case AudioInterruptionType.unknown:
+          if (!_isInterrupted) {
+            _wasPlayingBeforeInterruption = _player.playing || playbackState.value.playing;
+            _isInterrupted = true;
+          }
+          await pause();
+          break;
+      }
+    } else {
+      switch (event.type) {
+        case AudioInterruptionType.duck:
+          if (audioFocusLossAction == AutoFocusLossAction.duck) {
+            await _player.setVolume(1.0).catchError((_) {});
+          } else {
+            await _resumeAfterInterruption();
+          }
+          break;
+        case AudioInterruptionType.pause:
+          if (audioFocusLossAction == AutoFocusLossAction.duck) {
+            await _player.setVolume(1.0).catchError((_) {});
+          }
+          await _resumeAfterInterruption();
+          break;
+        case AudioInterruptionType.unknown:
+          break;
+      }
+    }
+  }
+
+  @visibleForTesting
+  Future<void> handleInterruptionForTesting(AudioInterruptionEvent event) => _handleInterruption(event);
+
+  @visibleForTesting
+  bool get wasPlayingBeforeInterruptionForTesting => _wasPlayingBeforeInterruption;
+
+  @visibleForTesting
+  bool get isInterruptedForTesting => _isInterrupted;
+
+  Future<void> _resumeAfterInterruption() async {
+    final shouldResume = _wasPlayingBeforeInterruption;
+    _isInterrupted = false;
+    _wasPlayingBeforeInterruption = false;
+
+    if (shouldResume && !playbackState.value.playing) {
+      // 1. Brief settle delay allowing car Bluetooth hardware relay / SCO to settle
+      await Future.delayed(const Duration(milliseconds: 250));
+
+      // 2. Smart Resume Rewind (1.5 seconds)
+      // This absorbs Bluetooth A2DP audio unmute latency and restarts the A2DP stream,
+      // forcing older vehicle head units to unmute their hardware amplifier.
+      try {
+        final currentPos = _player.position;
+        final rewindTarget = currentPos - const Duration(milliseconds: 1500);
+        await seek(rewindTarget < Duration.zero ? Duration.zero : rewindTarget);
+      } catch (_) {}
+
+      // 3. Resume playback
+      await play();
     }
   }
 
@@ -882,6 +925,9 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> pause() async {
     _playRequestId++;
+    if (!_isInterrupted) {
+      _wasPlayingBeforeInterruption = false;
+    }
     try {
       if (urlLoader != null) {
         playbackState.add(playbackState.value.copyWith(playing: false));
@@ -1392,6 +1438,14 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
 
   void setAutoFocusAction(AutoFocusLossAction action) {
     audioFocusLossAction = action;
+    if (urlLoader == null) {
+      final pauseWhenDucked = action == AutoFocusLossAction.pauseAndResume;
+      AudioSession.instance.then((session) {
+        session.configure(AudioSessionConfiguration.speech().copyWith(
+          androidWillPauseWhenDucked: pauseWhenDucked,
+        )).catchError((_) {});
+      }).catchError((_) {});
+    }
   }
 
   void setSleepTimerFadeDuration(int seconds) {
