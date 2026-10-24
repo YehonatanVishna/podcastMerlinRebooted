@@ -1,20 +1,55 @@
 package com.podcastmerlin.podcast_merlin_flutter
 
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import com.ryanheise.audioservice.AudioServiceActivity
+import es.antonborri.home_widget.HomeWidgetLaunchIntent
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : AudioServiceActivity() {
+    companion object {
+        /** URI attached to the home widget's launch intent to request the Now Playing sheet. */
+        const val NOW_PLAYING_URI = "podcastmerlin://now-playing"
+    }
+
     private val networkChannel = "com.podcastmerlin.app/network"
+    private val launchChannel = "com.podcastmerlin.app/launch"
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // Keep getIntent() current so a widget tap while the activity is alive can be
+        // consumed by Flutter on resume.
+        setIntent(intent)
+    }
+
+    /**
+     * Returns the widget launch URI (if this activity was opened from the home widget and the
+     * request has not been consumed yet) and clears it so subsequent resumes don't re-trigger.
+     */
+    private fun consumeWidgetLaunch(): String? {
+        val current = intent ?: return null
+        if (current.action != HomeWidgetLaunchIntent.HOME_WIDGET_LAUNCH_ACTION) return null
+        val uri = current.data?.toString() ?: ""
+        current.action = Intent.ACTION_MAIN
+        current.data = null
+        return uri
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, launchChannel).setMethodCallHandler { call, result ->
+            if (call.method == "consumeWidgetLaunch") {
+                result.success(consumeWidgetLaunch())
+            } else {
+                result.notImplemented()
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, networkChannel).setMethodCallHandler { call, result ->
             if (call.method == "getNetworkInfo") {
                 val context = applicationContext

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../features/player/podcast_widget_service.dart';
 import '../../features/sync/secure_storage_service.dart';
 import 'app_providers.dart';
 
@@ -11,6 +12,10 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
   bool _isLoaded = false;
   Future<void>? _loadFuture;
   final List<AppSettings Function(AppSettings)> _pendingTransforms = [];
+  // The playback speed already pushed to the audio handler. Used to avoid
+  // resetting the user's current playback speed every time an unrelated
+  // setting (e.g. pitch normalization) is changed.
+  double? _appliedDefaultSpeed;
 
   AppSettingsNotifier(this._storage, this._ref) : super(const AppSettings()) {
     _loadFuture = _loadSettings();
@@ -76,11 +81,19 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
       }
       _isLoaded = true;
 
+      // Push the persisted theme to the home screen widget right away. When playback is
+      // started from the widget, the engine runs headlessly and no frames are rendered,
+      // so the widget tree's post-frame sync wouldn't run until the app is opened.
+      _syncWidgetTheme(state);
+
       // Sync settings with audio handler
       try {
         final audioHandler = _ref.read(audioHandlerProvider);
         audioHandler.setSeekDurations(rewind: state.rewindDurationSeconds, fastForward: state.fastForwardDurationSeconds);
-        audioHandler.setDefaultSpeed(state.defaultPlaybackSpeed);
+        if (_appliedDefaultSpeed != state.defaultPlaybackSpeed) {
+          _appliedDefaultSpeed = state.defaultPlaybackSpeed;
+          audioHandler.setDefaultSpeed(state.defaultPlaybackSpeed);
+        }
         audioHandler.setNormalizePitch(state.normalizePitch);
         audioHandler.setAutoAdvance(state.autoAdvanceQueue);
         audioHandler.setMarkPlayedThreshold(state.markAsPlayedThresholdSeconds);
@@ -118,14 +131,28 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
     _propagateToServices(state);
   }
 
+  void _syncWidgetTheme(AppSettings settings) {
+    try {
+      PodcastWidgetService.instance.syncThemeWithSettings(settings);
+    } catch (_) {}
+  }
+
   void _propagateToServices(AppSettings settings) {
+    _syncWidgetTheme(settings);
+
     try {
       final audioHandler = _ref.read(audioHandlerProvider);
       audioHandler.setSeekDurations(
         rewind: settings.rewindDurationSeconds,
         fastForward: settings.fastForwardDurationSeconds,
       );
-      audioHandler.setDefaultSpeed(settings.defaultPlaybackSpeed);
+      // Only push the default speed when it actually changed. Otherwise every
+      // settings toggle (including pitch normalization) would reset the
+      // currently playing episode back to the default speed.
+      if (_appliedDefaultSpeed != settings.defaultPlaybackSpeed) {
+        _appliedDefaultSpeed = settings.defaultPlaybackSpeed;
+        audioHandler.setDefaultSpeed(settings.defaultPlaybackSpeed);
+      }
       audioHandler.setNormalizePitch(settings.normalizePitch);
       audioHandler.setAutoAdvance(settings.autoAdvanceQueue);
       audioHandler.setMarkPlayedThreshold(settings.markAsPlayedThresholdSeconds);
