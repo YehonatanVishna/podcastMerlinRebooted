@@ -1,6 +1,6 @@
-<p><b>Podcast Merlin</b> is a modern, cross-platform podcast client designed for seamless playback and synchronized podcast listening across devices, with native support for Nextcloud Podcast and gPodder.net synchronization.</p>
+<b>Podcast Merlin</b> is a modern, cross-platform podcast client designed for seamless playback and synchronized podcast listening across devices, with native support for Nextcloud Podcast and gPodder.net synchronization.
 
-<p><b>Features:</b></p>
+<b>Features:</b>
 <ul>
   <li><b>Nextcloud &amp; gPodder Sync:</b> Full bi-directional synchronization of podcast subscriptions, episode playback states, and position timestamps with offline queuing and collision resolution.</li>
   <li><b>Up Next Queue:</b> Interactive, persistent playback queue with drag-and-drop reordering, swipe removal, and continuous playback across shows.</li>

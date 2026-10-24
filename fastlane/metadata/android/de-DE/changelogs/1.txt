@@ -1,0 +1,9 @@
+Erstveröffentlichung von Podcast Merlin (v0.1.0):
+- Bidirektionale Nextcloud- und gPodder-Synchronisation
+- Interaktive Warteschlange mit Drag-and-Drop
+- Zuverlässiger Download-Manager mit Speicherlimits
+- Konfigurierbarer Einschlaftimer mit sanftem Ausblenden
+- Variable Wiedergabegeschwindigkeit (0,5x–3,0x) und Tonhöhenkorrektur
+- Android-Startbildschirm-Widget mit Design-Sync
+- Bluetooth-Audiofokus-Wiederherstellung und Smart Resume
+- OPML-Import und -Export

@@ -1,0 +1,15 @@
+<b>Podcast Merlin</b> ist ein moderner, plattformübergreifender Podcast-Client für nahtlose Wiedergabe und geräteübergreifende Synchronisation mit nativer Unterstützung für Nextcloud Podcast und gPodder.net.
+
+<b>Funktionen:</b>
+<ul>
+  <li><b>Nextcloud- &amp; gPodder-Sync:</b> Vollständige bidirektionale Synchronisation von Abonnements, Wiedergabestatus und Positionen mit Offline-Warteschlange und Konfliktbehebung.</li>
+  <li><b>Wiedergabeliste &amp; Warteschlange:</b> Interaktive Warteschlange mit Drag-and-Drop-Sortierung, Wischgesten und kontinuierlicher Wiedergabe.</li>
+  <li><b>Schlaf-Timer:</b> Flexibler Einschlaftimer mit Schnellwahltasten (5 bis 60 Min.), Countdown, Episodenende-Modus und sanfter Audio-Ausblendung.</li>
+  <li><b>Geschwindigkeit &amp; Tonhöhenkorrektur:</b> Fein einstellbare Wiedergabegeschwindigkeit (0,5x bis 3,0x) mit zuschaltbarer Tonhöhenkorrektur und anpassbaren Spulintervallen.</li>
+  <li><b>Zuverlässige Downloads:</b> Download-Manager für Episoden mit automatischer Wiederaufnahme bei Netzwerkwechsel, Speicherplatzgrenzen und automatischer Bereinigung.</li>
+  <li><b>Netzwerkfilter:</b> Konfigurierbare Regeln für Cloud-Sync (beliebiges Netzwerk, nur WLAN/Ethernet oder bestimmte Heim-WLAN-SSIDs).</li>
+  <li><b>Startbildschirm-Widget:</b> Natives Android-Widget mit Direktaufruf der aktuellen Wiedergabe und dynamischer Anpassung an das Material-You-Design.</li>
+  <li><b>Bluetooth &amp; Auto-Audio:</b> Intelligentes Audiofokus-Management für Bluetooth-Autoradios mit automatischer Wiederaufnahme nach Unterbrechungen.</li>
+  <li><b>Suche &amp; Entdecken:</b> Podcasts über das Apple Podcasts-Verzeichnis suchen oder per RSS-Feed-URL abonnieren, inklusive OPML-Import und -Export.</li>
+  <li><b>Privatsphäre &amp; Open Source:</b> Keine Tracker, keine Werbung, keine proprietären SDKs und 100% Open Source unter der AGPL-3.0-Lizenz.</li>
+</ul>
