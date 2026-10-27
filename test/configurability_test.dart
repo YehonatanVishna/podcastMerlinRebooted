@@ -1029,11 +1029,14 @@ void main() {
       );
       await handler.setNormalizePitch(false);
       expect(handler.normalizePitch, isFalse);
-      expect(methodCalls.any((call) => call.method == 'setNormalizePitch' && (call.arguments as Map)['normalize'] == false), isTrue);
+      expect(methodCalls.any((call) => call.method == 'setNormalizePitch' && (call.arguments as Map)['normalize'] == false && (call.arguments as Map)['speed'] == 1.0), isTrue);
 
       await handler.setNormalizePitch(true);
       expect(handler.normalizePitch, isTrue);
-      expect(methodCalls.any((call) => call.method == 'setNormalizePitch' && (call.arguments as Map)['normalize'] == true), isTrue);
+      expect(methodCalls.any((call) => call.method == 'setNormalizePitch' && (call.arguments as Map)['normalize'] == true && (call.arguments as Map)['speed'] == 1.0), isTrue);
+
+      await handler.setSpeed(1.5);
+      expect(methodCalls.any((call) => call.method == 'setNormalizePitch' && (call.arguments as Map)['speed'] == 1.5), isTrue);
     });
   });
 }

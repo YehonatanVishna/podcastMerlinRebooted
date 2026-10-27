@@ -18,18 +18,50 @@ class NowPlayingSheet extends ConsumerStatefulWidget {
   const NowPlayingSheet({super.key});
 
   static bool _isShowing = false;
+  static int _showGeneration = 0;
+  static ModalRoute<dynamic>? _activeRoute;
+  static NavigatorState? _activeNavigator;
 
   @visibleForTesting
-  static set isShowingForTesting(bool value) => _isShowing = value;
+  static set isShowingForTesting(bool value) {
+    _isShowing = value;
+    if (!value) {
+      _activeRoute = null;
+      _activeNavigator = null;
+    }
+  }
 
   static Future<void> show(BuildContext context) async {
-    if (_isShowing) return;
+    if (!context.mounted) return;
+    final existingRoute = _activeRoute;
+    if (_isShowing) {
+      if (existingRoute == null) {
+        return;
+      }
+      if (existingRoute.isActive && existingRoute.isCurrent) {
+        return;
+      }
+      if (existingRoute.isActive && !existingRoute.isCurrent) {
+        final nav = _activeNavigator ??
+            Navigator.maybeOf(context, rootNavigator: true) ??
+            Navigator.maybeOf(context);
+        if (nav != null) {
+          nav.removeRoute(existingRoute);
+        }
+      }
+      _activeRoute = null;
+      _activeNavigator = null;
+      _isShowing = false;
+    }
+
     _isShowing = true;
+    final int generation = ++_showGeneration;
     try {
       await showModalBottomSheet(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
+        useRootNavigator: true,
         backgroundColor: Theme.of(context).colorScheme.surface,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -37,7 +69,11 @@ class NowPlayingSheet extends ConsumerStatefulWidget {
         builder: (_) => const NowPlayingSheet(),
       );
     } finally {
-      _isShowing = false;
+      if (_showGeneration == generation) {
+        _isShowing = false;
+        _activeRoute = null;
+        _activeNavigator = null;
+      }
     }
   }
 
@@ -49,13 +85,25 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
   double? _dragSeconds;
   StreamSubscription<MediaItem?>? _mediaItemSub;
   bool _isDismissing = false;
+  ModalRoute<dynamic>? _ownRoute;
 
   void _dismissIfEmpty() {
     if (_isDismissing || !mounted) return;
     final audioHandler = ref.read(audioHandlerProvider);
-    if (audioHandler.mediaItem.value == null && audioHandler.currentEpisode == null) {
+    if (audioHandler.mediaItem.valueOrNull == null && audioHandler.currentEpisode == null) {
+      final route = _ownRoute ?? ModalRoute.of(context);
+      final nav = Navigator.maybeOf(context);
+      if (nav == null) return;
       _isDismissing = true;
-      Navigator.of(context).maybePop();
+      if (route != null && route.isActive) {
+        if (route.isCurrent) {
+          nav.maybePop();
+        } else {
+          nav.removeRoute(route);
+        }
+      } else if (nav.canPop()) {
+        nav.maybePop();
+      }
     }
   }
 
@@ -64,6 +112,7 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _dismissIfEmpty();
       final audioHandler = ref.read(audioHandlerProvider);
       _mediaItemSub = audioHandler.mediaItem.listen((item) {
         if (item == null && audioHandler.currentEpisode == null) {
@@ -74,7 +123,23 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null) {
+      _ownRoute = route;
+      NowPlayingSheet._activeRoute = route;
+      NowPlayingSheet._activeNavigator =
+          Navigator.maybeOf(context, rootNavigator: true) ?? Navigator.maybeOf(context);
+    }
+  }
+
+  @override
   void dispose() {
+    if (_ownRoute != null && NowPlayingSheet._activeRoute == _ownRoute) {
+      NowPlayingSheet._activeRoute = null;
+      NowPlayingSheet._activeNavigator = null;
+    }
     _mediaItemSub?.cancel();
     super.dispose();
   }
@@ -134,8 +199,9 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
 
     return StreamBuilder<MediaItem?>(
       stream: audioHandler.mediaItem,
+      initialData: audioHandler.mediaItem.valueOrNull,
       builder: (context, mediaSnapshot) {
-        final item = mediaSnapshot.data;
+        final item = mediaSnapshot.data ?? audioHandler.mediaItem.valueOrNull;
         final episode = audioHandler.currentEpisode;
 
         if (item == null && episode == null) {
@@ -151,13 +217,14 @@ class _NowPlayingSheetState extends ConsumerState<NowPlayingSheet> {
 
         return StreamBuilder<PlaybackState>(
           stream: audioHandler.playbackState,
+          initialData: audioHandler.playbackState.value,
           builder: (context, playbackSnapshot) {
-            final state = playbackSnapshot.data;
-            final isPlaying = state?.playing ?? false;
+            final state = playbackSnapshot.data ?? audioHandler.playbackState.value;
+            final isPlaying = state.playing;
             final isBuffering = isPlaying &&
-                (state?.processingState == AudioProcessingState.buffering ||
-                    state?.processingState == AudioProcessingState.loading);
-            final position = state?.position ?? Duration.zero;
+                (state.processingState == AudioProcessingState.buffering ||
+                    state.processingState == AudioProcessingState.loading);
+            final position = state.position;
 
             final maxSeconds = totalDuration.inSeconds > 0 ? totalDuration.inSeconds : 1;
             final clampedSec = position.inSeconds.clamp(0, maxSeconds).toDouble();

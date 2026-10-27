@@ -138,7 +138,9 @@ class MainShellState extends ConsumerState<MainShell> with WidgetsBindingObserve
       final uri = await WidgetLaunchService.instance.consumeWidgetLaunch();
       if (!mounted || !WidgetLaunchService.shouldOpenNowPlaying(uri)) return;
       final audioHandler = ref.read(audioHandlerProvider);
-      if (audioHandler.mediaItem.value == null && audioHandler.currentEpisode == null) return;
+      if (audioHandler.mediaItem.valueOrNull == null && audioHandler.currentEpisode == null) {
+        return;
+      }
       unawaited(NowPlayingSheet.show(context));
     } finally {
       _checkingWidgetLaunch = false;

@@ -267,5 +267,97 @@ void main() {
       // Playback was not paused/toggled by the drag gesture
       expect(audioHandler.playbackState.value.playing, isTrue);
     });
+
+    testWidgets('short upward swipe (25px, just above touch slop) opens NowPlayingSheet without dead-zone', (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NowPlayingSheet), findsNothing);
+
+      // 25px upward drag exceeds kTouchSlop (18px) and previously fell into the 18..58px dead zone
+      await tester.drag(find.byType(PlayerDock), const Offset(0, -25));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NowPlayingSheet), findsOneWidget);
+    });
+
+    testWidgets('wide/desktop PlayerDock (>= 600px) opens NowPlayingSheet via tap, expand button, and swipe up', (tester) async {
+      tester.view.physicalSize = const Size(800, 600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(buildTestWidget(size: const Size(800, 600)));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NowPlayingSheet), findsNothing);
+
+      // 1. Tap episode title on desktop dock
+      await tester.tap(find.text('Swipe Gesture Test Episode'));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pumpAndSettle();
+      expect(find.byType(NowPlayingSheet), findsOneWidget);
+
+      // Close sheet
+      await tester.tap(find.byIcon(Icons.keyboard_arrow_down));
+      await tester.pumpAndSettle();
+      expect(find.byType(NowPlayingSheet), findsNothing);
+
+      // 2. Tap expand button on desktop dock
+      await tester.tap(find.byIcon(Icons.keyboard_arrow_up));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pumpAndSettle();
+      expect(find.byType(NowPlayingSheet), findsOneWidget);
+
+      // Close sheet
+      await tester.tap(find.byIcon(Icons.keyboard_arrow_down));
+      await tester.pumpAndSettle();
+      expect(find.byType(NowPlayingSheet), findsNothing);
+
+      // 3. Swipe up on desktop dock
+      await tester.drag(find.byType(PlayerDock), const Offset(0, -40));
+      await tester.pumpAndSettle();
+      expect(find.byType(NowPlayingSheet), findsOneWidget);
+      await tester.pump(const Duration(seconds: 11));
+    });
+
+    testWidgets('NowPlayingSheet recovers and re-opens when buried under another pushed route', (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pumpAndSettle();
+
+      // Open NowPlayingSheet
+      await tester.tap(find.byIcon(Icons.keyboard_arrow_up));
+      await tester.pumpAndSettle();
+      expect(find.byType(NowPlayingSheet), findsOneWidget);
+
+      // Simulate a route pushed on top of NowPlayingSheet (e.g., deep link / activity route push)
+      final nav = Navigator.of(tester.element(find.byType(NowPlayingSheet)));
+      unawaited(nav.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(
+            body: Center(child: Text('New Top Route')),
+            bottomNavigationBar: PlayerDock(),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('New Top Route'), findsOneWidget);
+
+      // Tapping PlayerDock on the new top route should remove the buried sheet and open NowPlayingSheet on top!
+      await tester.tap(find.byIcon(Icons.keyboard_arrow_up).last);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NowPlayingSheet), findsOneWidget);
+      expect(find.byIcon(Icons.keyboard_arrow_down), findsOneWidget);
+      await tester.pump(const Duration(seconds: 11));
+    });
   });
 }

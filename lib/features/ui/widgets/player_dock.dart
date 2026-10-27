@@ -19,8 +19,9 @@ class PlayerDock extends ConsumerWidget {
 
     return StreamBuilder<MediaItem?>(
       stream: audioHandler.mediaItem,
+      initialData: audioHandler.mediaItem.valueOrNull,
       builder: (context, mediaSnapshot) {
-        final item = mediaSnapshot.data;
+        final item = mediaSnapshot.data ?? audioHandler.mediaItem.valueOrNull;
         final episode = audioHandler.currentEpisode;
 
         if (item == null && episode == null) {
@@ -35,13 +36,14 @@ class PlayerDock extends ConsumerWidget {
 
         return StreamBuilder<PlaybackState>(
           stream: audioHandler.playbackState,
+          initialData: audioHandler.playbackState.value,
           builder: (context, playbackSnapshot) {
-            final state = playbackSnapshot.data;
-            final isPlaying = state?.playing ?? false;
+            final state = playbackSnapshot.data ?? audioHandler.playbackState.value;
+            final isPlaying = state.playing;
             final isBuffering = isPlaying &&
-                (state?.processingState == AudioProcessingState.buffering ||
-                    state?.processingState == AudioProcessingState.loading);
-            final position = state?.position ?? Duration.zero;
+                (state.processingState == AudioProcessingState.buffering ||
+                    state.processingState == AudioProcessingState.loading);
+            final position = state.position;
 
             final maxSeconds = totalDuration.inSeconds > 0 ? totalDuration.inSeconds : 1;
             final clampedSec = position.inSeconds.clamp(0, maxSeconds).toDouble();
@@ -246,218 +248,244 @@ class PlayerDock extends ConsumerWidget {
   }) {
     final theme = Theme.of(context);
 
-    return Container(
-      height: 90,
-      decoration: BoxDecoration(
+    return _MiniPlayerGestureWrapper(
+      onSwipeUp: () {
+        if (context.mounted) {
+          NowPlayingSheet.show(context);
+        }
+      },
+      child: Material(
         color: theme.colorScheme.surface,
-        border: Border(
-          top: BorderSide(
-            color: theme.dividerColor.withValues(alpha: 0.2),
-          ),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: theme.brightness == Brightness.dark ? Colors.black54 : Colors.black12,
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Slider Bar
-          SizedBox(
-            height: 18,
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                trackHeight: 3,
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-              ),
-              child: Slider(
-                min: 0.0,
-                max: maxSeconds.toDouble(),
-                value: clampedSec,
-                onChanged: (val) {
-                  audioHandler.seek(Duration(seconds: val.toInt()));
-                },
+        child: Container(
+          height: 90,
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            border: Border(
+              top: BorderSide(
+                color: theme.dividerColor.withValues(alpha: 0.2),
               ),
             ),
-          ),
-          Row(
-            children: [
-              // Thumbnail Artwork
-              AppCachedImage(
-                imageUrl: imageUrl,
-                width: 48,
-                height: 48,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              const SizedBox(width: 12),
-              // Title & Podcast Name
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      isBuffering
-                          ? 'Buffering... • ${_formatDuration(position)} / ${_formatDuration(totalDuration)}'
-                          : '${_formatDuration(position)} / ${_formatDuration(totalDuration)}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.7),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Rewind with configured duration
-              StreamBuilder<({int rewind, int fastForward})>(
-                stream: audioHandler.seekDurationsStream,
-                initialData: (
-                  rewind: audioHandler.rewindDuration,
-                  fastForward: audioHandler.fastForwardDuration,
-                ),
-                builder: (context, seekSnapshot) {
-                  final rewindSec = seekSnapshot.data?.rewind ?? audioHandler.rewindDuration;
-                  return IconButton(
-                    visualDensity: VisualDensity.compact,
-                    icon: _buildRewindIcon(rewindSec),
-                    tooltip: 'Rewind ${rewindSec}s',
-                    onPressed: () => audioHandler.rewind(),
-                  );
-                },
-              ),
-              // Play / Pause
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                tooltip: isBuffering ? 'Buffering...' : (isPlaying ? 'Pause' : 'Play'),
-                icon: isBuffering
-                    ? SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: theme.colorScheme.primary,
-                        ),
-                      )
-                    : Icon(
-                        isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                        size: 38,
-                        color: theme.colorScheme.primary,
-                      ),
-                onPressed: () {
-                  if (isPlaying) {
-                    audioHandler.pause();
-                  } else {
-                    audioHandler.play();
-                  }
-                },
-              ),
-              // Fast Forward with configured duration
-              StreamBuilder<({int rewind, int fastForward})>(
-                stream: audioHandler.seekDurationsStream,
-                initialData: (
-                  rewind: audioHandler.rewindDuration,
-                  fastForward: audioHandler.fastForwardDuration,
-                ),
-                builder: (context, seekSnapshot) {
-                  final forwardSec =
-                      seekSnapshot.data?.fastForward ?? audioHandler.fastForwardDuration;
-                  return IconButton(
-                    visualDensity: VisualDensity.compact,
-                    icon: _buildForwardIcon(forwardSec),
-                    tooltip: 'Fast forward ${forwardSec}s',
-                    onPressed: () => audioHandler.fastForward(),
-                  );
-                },
-              ),
-              // Episode Description button
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.description_outlined),
-                tooltip: 'Episode Description',
-                onPressed: () {
-                  final ep = audioHandler.currentEpisode;
-                  if (ep != null) {
-                    EpisodeDescriptionSheet.show(context, ep);
-                  }
-                },
-              ),
-              // Speed selector
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.speed),
-                tooltip: 'Playback Speed',
-                onPressed: () => PlaybackSpeedSheet.show(context),
-              ),
-              // Sleep Timer button
-              StreamBuilder<Duration?>(
-                stream: audioHandler.sleepTimerStream,
-                initialData: audioHandler.sleepTimerRemaining,
-                builder: (context, sleepSnapshot) {
-                  final isActive = audioHandler.isSleepTimerActive;
-                  final isEnd = audioHandler.isSleepTimerEndOfEpisode;
-                  final remaining = sleepSnapshot.data ?? audioHandler.sleepTimerRemaining;
-
-                  Widget iconWidget = const Icon(Icons.bedtime_outlined);
-                  if (isActive) {
-                    final label = isEnd
-                        ? 'End'
-                        : (remaining != null ? '${remaining.inMinutes}m' : 'On');
-                    iconWidget = Badge(
-                      label: Text(label, style: const TextStyle(fontSize: 9)),
-                      backgroundColor: theme.colorScheme.primary,
-                      child: Icon(Icons.bedtime, color: theme.colorScheme.primary),
-                    );
-                  }
-
-                  return IconButton(
-                    visualDensity: VisualDensity.compact,
-                    icon: iconWidget,
-                    tooltip: 'Sleep Timer',
-                    onPressed: () => SleepTimerBottomSheet.show(context),
-                  );
-                },
-              ),
-              // Queue button
-              StreamBuilder<List<Episode>>(
-                stream: audioHandler.queueStream,
-                initialData: audioHandler.currentQueue,
-                builder: (context, queueSnapshot) {
-                  final queue = queueSnapshot.data ?? audioHandler.currentQueue;
-                  Widget iconWidget = const Icon(Icons.queue_music);
-                  if (queue.isNotEmpty) {
-                    iconWidget = Badge(
-                      label: Text('${queue.length}', style: const TextStyle(fontSize: 9)),
-                      backgroundColor: theme.colorScheme.primary,
-                      child: Icon(Icons.queue_music, color: theme.colorScheme.primary),
-                    );
-                  }
-
-                  return IconButton(
-                    visualDensity: VisualDensity.compact,
-                    icon: iconWidget,
-                    tooltip: 'Up Next Queue',
-                    onPressed: () => QueueBottomSheet.show(context),
-                  );
-                },
+            boxShadow: [
+              BoxShadow(
+                color: theme.brightness == Brightness.dark ? Colors.black54 : Colors.black12,
+                blurRadius: 10,
+                offset: const Offset(0, -2),
               ),
             ],
           ),
-        ],
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Slider Bar
+              SizedBox(
+                height: 18,
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    trackHeight: 3,
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                  ),
+                  child: Slider(
+                    min: 0.0,
+                    max: maxSeconds.toDouble(),
+                    value: clampedSec,
+                    onChanged: (val) {
+                      audioHandler.seek(Duration(seconds: val.toInt()));
+                    },
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  // Clickable Thumbnail Artwork + Title & Podcast Name
+                  Expanded(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () => NowPlayingSheet.show(context),
+                      child: Row(
+                        children: [
+                          AppCachedImage(
+                            imageUrl: imageUrl,
+                            width: 48,
+                            height: 48,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  isBuffering
+                                      ? 'Buffering... • ${_formatDuration(position)} / ${_formatDuration(totalDuration)}'
+                                      : '${_formatDuration(position)} / ${_formatDuration(totalDuration)}',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.7),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Rewind with configured duration
+                  StreamBuilder<({int rewind, int fastForward})>(
+                    stream: audioHandler.seekDurationsStream,
+                    initialData: (
+                      rewind: audioHandler.rewindDuration,
+                      fastForward: audioHandler.fastForwardDuration,
+                    ),
+                    builder: (context, seekSnapshot) {
+                      final rewindSec = seekSnapshot.data?.rewind ?? audioHandler.rewindDuration;
+                      return IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: _buildRewindIcon(rewindSec),
+                        tooltip: 'Rewind ${rewindSec}s',
+                        onPressed: () => audioHandler.rewind(),
+                      );
+                    },
+                  ),
+                  // Play / Pause
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: isBuffering ? 'Buffering...' : (isPlaying ? 'Pause' : 'Play'),
+                    icon: isBuffering
+                        ? SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: theme.colorScheme.primary,
+                            ),
+                          )
+                        : Icon(
+                            isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                            size: 38,
+                            color: theme.colorScheme.primary,
+                          ),
+                    onPressed: () {
+                      if (isPlaying) {
+                        audioHandler.pause();
+                      } else {
+                        audioHandler.play();
+                      }
+                    },
+                  ),
+                  // Fast Forward with configured duration
+                  StreamBuilder<({int rewind, int fastForward})>(
+                    stream: audioHandler.seekDurationsStream,
+                    initialData: (
+                      rewind: audioHandler.rewindDuration,
+                      fastForward: audioHandler.fastForwardDuration,
+                    ),
+                    builder: (context, seekSnapshot) {
+                      final forwardSec =
+                          seekSnapshot.data?.fastForward ?? audioHandler.fastForwardDuration;
+                      return IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: _buildForwardIcon(forwardSec),
+                        tooltip: 'Fast forward ${forwardSec}s',
+                        onPressed: () => audioHandler.fastForward(),
+                      );
+                    },
+                  ),
+                  // Episode Description button
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.description_outlined),
+                    tooltip: 'Episode Description',
+                    onPressed: () {
+                      final ep = audioHandler.currentEpisode;
+                      if (ep != null) {
+                        EpisodeDescriptionSheet.show(context, ep);
+                      }
+                    },
+                  ),
+                  // Speed selector
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.speed),
+                    tooltip: 'Playback Speed',
+                    onPressed: () => PlaybackSpeedSheet.show(context),
+                  ),
+                  // Sleep Timer button
+                  StreamBuilder<Duration?>(
+                    stream: audioHandler.sleepTimerStream,
+                    initialData: audioHandler.sleepTimerRemaining,
+                    builder: (context, sleepSnapshot) {
+                      final isActive = audioHandler.isSleepTimerActive;
+                      final isEnd = audioHandler.isSleepTimerEndOfEpisode;
+                      final remaining = sleepSnapshot.data ?? audioHandler.sleepTimerRemaining;
+
+                      Widget iconWidget = const Icon(Icons.bedtime_outlined);
+                      if (isActive) {
+                        final label = isEnd
+                            ? 'End'
+                            : (remaining != null ? '${remaining.inMinutes}m' : 'On');
+                        iconWidget = Badge(
+                          label: Text(label, style: const TextStyle(fontSize: 9)),
+                          backgroundColor: theme.colorScheme.primary,
+                          child: Icon(Icons.bedtime, color: theme.colorScheme.primary),
+                        );
+                      }
+
+                      return IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: iconWidget,
+                        tooltip: 'Sleep Timer',
+                        onPressed: () => SleepTimerBottomSheet.show(context),
+                      );
+                    },
+                  ),
+                  // Queue button
+                  StreamBuilder<List<Episode>>(
+                    stream: audioHandler.queueStream,
+                    initialData: audioHandler.currentQueue,
+                    builder: (context, queueSnapshot) {
+                      final queue = queueSnapshot.data ?? audioHandler.currentQueue;
+                      Widget iconWidget = const Icon(Icons.queue_music);
+                      if (queue.isNotEmpty) {
+                        iconWidget = Badge(
+                          label: Text('${queue.length}', style: const TextStyle(fontSize: 9)),
+                          backgroundColor: theme.colorScheme.primary,
+                          child: Icon(Icons.queue_music, color: theme.colorScheme.primary),
+                        );
+                      }
+
+                      return IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: iconWidget,
+                        tooltip: 'Up Next Queue',
+                        onPressed: () => QueueBottomSheet.show(context),
+                      );
+                    },
+                  ),
+                  // Expand Icon Button
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.keyboard_arrow_up),
+                    tooltip: 'Open Player',
+                    onPressed: () => NowPlayingSheet.show(context),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -527,30 +555,47 @@ class _MiniPlayerGestureWrapper extends StatefulWidget {
 
 class _MiniPlayerGestureWrapperState extends State<_MiniPlayerGestureWrapper> {
   double _verticalDelta = 0.0;
+  double? _downY;
+  double? _lastY;
+
+  void _reset() {
+    _verticalDelta = 0.0;
+    _downY = null;
+    _lastY = null;
+  }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onVerticalDragStart: (_) {
+      onVerticalDragDown: (details) {
         _verticalDelta = 0.0;
+        _downY = details.globalPosition.dy;
+        _lastY = _downY;
+      },
+      onVerticalDragStart: (details) {
+        _verticalDelta = 0.0;
+        _lastY = details.globalPosition.dy;
       },
       onVerticalDragUpdate: (details) {
         _verticalDelta += details.delta.dy;
+        _lastY = details.globalPosition.dy;
       },
       onVerticalDragEnd: (details) {
         final velocity = details.primaryVelocity ?? 0.0;
+        final totalDy = (_downY != null && _lastY != null) ? (_lastY! - _downY!) : _verticalDelta;
         // In Flutter coordinates, upward movement results in negative dy/velocity.
-        final isFlingUp = velocity < -150;
-        final isDragUp = velocity <= 50 && _verticalDelta < -40;
+        // Because VerticalDragGestureRecognizer already consumed kTouchSlop (18px) before
+        // onVerticalDragStart (cancelling child taps), any upward drag or short swipe that
+        // won the vertical drag arena should open the player sheet.
+        final isFlingUp = velocity < -100;
+        final isDragUp = velocity < 300 && (_verticalDelta < -5 || totalDy < -12);
         if (isFlingUp || isDragUp) {
           widget.onSwipeUp();
         }
-        _verticalDelta = 0.0;
+        _reset();
       },
-      onVerticalDragCancel: () {
-        _verticalDelta = 0.0;
-      },
+      onVerticalDragCancel: _reset,
       child: widget.child,
     );
   }

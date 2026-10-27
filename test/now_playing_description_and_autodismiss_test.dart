@@ -234,4 +234,53 @@ void main() {
     // NowPlayingSheet should have auto-dismissed / popped!
     expect(find.byType(NowPlayingSheet), findsNothing);
   });
+
+  testWidgets('NowPlayingSheet auto-dismisses its own route even when a child sheet is open on top, allowing future re-open', (tester) async {
+    await tester.pumpWidget(buildTestApp(
+      child: Builder(
+        builder: (context) => ElevatedButton(
+          onPressed: () => NowPlayingSheet.show(context),
+          child: const Text('Open NowPlaying'),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // Open NowPlayingSheet
+    await tester.tap(find.text('Open NowPlaying'));
+    await tester.pumpAndSettle();
+    expect(find.byType(NowPlayingSheet), findsOneWidget);
+
+    // Open EpisodeDescriptionSheet on top of NowPlayingSheet
+    await tester.tap(find.byTooltip('Episode Description'));
+    await tester.pumpAndSettle();
+    expect(find.byType(EpisodeDescriptionSheet), findsOneWidget);
+
+    // Simulate playback completion while child sheet is open
+    await tester.runAsync(() async {
+      await audioHandler.onPlaybackCompletedForTesting();
+      await Future.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pumpAndSettle();
+
+    // Child EpisodeDescriptionSheet should still be open, while NowPlayingSheet removed itself underneath
+    expect(find.byType(EpisodeDescriptionSheet), findsOneWidget);
+    expect(find.byType(NowPlayingSheet), findsNothing);
+
+    // Close EpisodeDescriptionSheet
+    Navigator.of(tester.element(find.byType(EpisodeDescriptionSheet))).pop();
+    await tester.pumpAndSettle();
+    expect(find.byType(EpisodeDescriptionSheet), findsNothing);
+
+    // Start playing again and verify NowPlayingSheet.show() works (not deadlocked!)
+    await tester.runAsync(() async {
+      final ep10 = (await db.getEpisodeByGuid('guid-desc-10'))!;
+      await audioHandler.playEpisode(ep10);
+    });
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Open NowPlaying'));
+    await tester.pumpAndSettle();
+    expect(find.byType(NowPlayingSheet), findsOneWidget);
+  });
 }

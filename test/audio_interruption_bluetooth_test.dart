@@ -124,5 +124,172 @@ void main() {
       handler.setAutoFocusAction(AutoFocusLossAction.pauseAndResume);
       expect(handler.audioFocusLossAction, equals(AutoFocusLossAction.pauseAndResume));
     });
+
+    test('Short notification chime where begin: false arrives while pause() is still resolving', () async {
+      final ep = makeTestEpisode(4, 'ep-4', 'Episode 4', 400);
+
+      await handler.playEpisode(ep);
+      expect(handler.playbackState.value.playing, isTrue);
+
+      // Dispatch begin: true and begin: false concurrently (simulating rapid 100ms notification)
+      final beginFuture = handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(true, AudioInterruptionType.pause),
+      );
+      final endFuture = handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(false, AudioInterruptionType.pause),
+      );
+
+      await Future.wait([beginFuture, endFuture]);
+
+      // Playback must cleanly resume once the brief chime ends
+      expect(handler.playbackState.value.playing, isTrue);
+      expect(handler.isInterruptedForTesting, isFalse);
+      expect(handler.wasPlayingBeforeInterruptionForTesting, isFalse);
+    });
+
+    test('Consecutive notification cues with settle delay do not drop resumption', () async {
+      final ep = makeTestEpisode(5, 'ep-5', 'Episode 5', 500);
+
+      await handler.playEpisode(ep);
+      expect(handler.playbackState.value.playing, isTrue);
+
+      // Cue 1 begins: audio pauses
+      await handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(true, AudioInterruptionType.pause),
+      );
+      expect(handler.playbackState.value.playing, isFalse);
+      expect(handler.isInterruptedForTesting, isTrue);
+      expect(handler.wasPlayingBeforeInterruptionForTesting, isTrue);
+
+      // Cue 1 ends: enters 250ms settle delay
+      final cue1ResumeFuture = handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(false, AudioInterruptionType.pause),
+      );
+      expect(handler.isResumingFromInterruptionForTesting, isTrue);
+      expect(handler.playbackState.value.playing, isFalse);
+
+      // Cue 2 begins 50ms into settle delay: should preempt cue 1 resume and preserve state
+      await Future.delayed(const Duration(milliseconds: 50));
+      final cue2BeginFuture = handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(true, AudioInterruptionType.pause),
+      );
+      await cue2BeginFuture;
+
+      expect(handler.isInterruptedForTesting, isTrue);
+      expect(handler.wasPlayingBeforeInterruptionForTesting, isTrue);
+      expect(handler.isResumingFromInterruptionForTesting, isFalse);
+      expect(handler.playbackState.value.playing, isFalse);
+
+      // Await cue 1's preempted resume (it will abort without playing)
+      await cue1ResumeFuture;
+      expect(handler.playbackState.value.playing, isFalse);
+      expect(handler.wasPlayingBeforeInterruptionForTesting, isTrue);
+
+      // Cue 2 finishes
+      await handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(false, AudioInterruptionType.pause),
+      );
+
+      // Playback must resume after Cue 2's settle delay
+      expect(handler.playbackState.value.playing, isTrue);
+      expect(handler.isInterruptedForTesting, isFalse);
+      expect(handler.wasPlayingBeforeInterruptionForTesting, isFalse);
+    });
+
+    test('Ducking vs pause-and-resume actions', () async {
+      final ep = makeTestEpisode(6, 'ep-6', 'Episode 6', 600);
+      await handler.playEpisode(ep);
+      expect(handler.playbackState.value.playing, isTrue);
+
+      // Test Ducking mode
+      handler.setAutoFocusAction(AutoFocusLossAction.duck);
+
+      // Duck interruption: audio should keep playing at ducked volume
+      await handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(true, AudioInterruptionType.duck),
+      );
+      expect(handler.playbackState.value.playing, isTrue);
+      expect(handler.isInterruptedForTesting, isFalse);
+
+      await handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(false, AudioInterruptionType.duck),
+      );
+      expect(handler.playbackState.value.playing, isTrue);
+
+      // Non-transient pause interruption while in ducking mode: must still pause
+      await handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(true, AudioInterruptionType.pause),
+      );
+      expect(handler.playbackState.value.playing, isFalse);
+      expect(handler.isInterruptedForTesting, isTrue);
+
+      await handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(false, AudioInterruptionType.pause),
+      );
+      expect(handler.playbackState.value.playing, isTrue);
+
+      // Test PauseAndResume mode
+      handler.setAutoFocusAction(AutoFocusLossAction.pauseAndResume);
+
+      // Duck interruption: must pause rather than duck volume
+      await handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(true, AudioInterruptionType.duck),
+      );
+      expect(handler.playbackState.value.playing, isFalse);
+      expect(handler.isInterruptedForTesting, isTrue);
+
+      await handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(false, AudioInterruptionType.duck),
+      );
+      expect(handler.playbackState.value.playing, isTrue);
+      expect(handler.isInterruptedForTesting, isFalse);
+    });
+
+    test('User manual pause during interruption or settle delay cancels resumption [CR-03]', () async {
+      final ep = makeTestEpisode(7, 'ep-7', 'Episode 7', 700);
+      await handler.playEpisode(ep);
+      expect(handler.playbackState.value.playing, isTrue);
+
+      // Interruption starts
+      await handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(true, AudioInterruptionType.pause),
+      );
+      expect(handler.playbackState.value.playing, isFalse);
+      expect(handler.isInterruptedForTesting, isTrue);
+
+      // User explicitly pauses while interrupted
+      await handler.pause();
+      expect(handler.wasPlayingBeforeInterruptionForTesting, isFalse);
+      expect(handler.isInterruptedForTesting, isFalse);
+
+      // Interruption ends
+      await handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(false, AudioInterruptionType.pause),
+      );
+
+      // Must remain paused!
+      expect(handler.playbackState.value.playing, isFalse);
+    });
+
+    test('Permanent focus loss (AudioInterruptionType.unknown) does not auto-resume [CR-05]', () async {
+      final ep = makeTestEpisode(8, 'ep-8', 'Episode 8', 800);
+      await handler.playEpisode(ep);
+      expect(handler.playbackState.value.playing, isTrue);
+
+      // Interruption starts with unknown (permanent focus loss)
+      await handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(true, AudioInterruptionType.unknown),
+      );
+      expect(handler.playbackState.value.playing, isFalse);
+
+      // Interruption ends for unknown
+      await handler.handleInterruptionForTesting(
+        AudioInterruptionEvent(false, AudioInterruptionType.unknown),
+      );
+
+      // Must not auto-resume on permanent focus loss
+      expect(handler.playbackState.value.playing, isFalse);
+      expect(handler.wasPlayingBeforeInterruptionForTesting, isFalse);
+    });
   });
 }
