@@ -23,6 +23,7 @@ import com.ryanheise.audioservice.AudioServiceActivity
 import com.ryanheise.just_audio.JustAudioPlugin
 import es.antonborri.home_widget.HomeWidgetLaunchIntent
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : AudioServiceActivity() {
@@ -89,12 +90,61 @@ class MainActivity : AudioServiceActivity() {
         } catch (_: Exception) {}
     }
 
+    /**
+     * Fixes an upstream serialization bug in audio_session-0.1.25 where Dart sends
+     * 'audioAttribute' (singular) while AndroidAudioManager expects 'audioAttributes' (plural).
+     * Populates 'audioAttributes' so native AudioFocusRequest gets proper USAGE_MEDIA
+     * and CONTENT_TYPE_SPEECH attributes required by modern Android (Pixel 10 / Android 17).
+     */
+    private fun fixAudioSessionFocusAttributes(flutterEngine: FlutterEngine) {
+        try {
+            val messenger = flutterEngine.dartExecutor.binaryMessenger
+            val plugin = flutterEngine.plugins.get(com.ryanheise.audio_session.AudioSessionPlugin::class.java) as? com.ryanheise.audio_session.AudioSessionPlugin ?: return
+            val managerField = plugin.javaClass.getDeclaredField("androidAudioManager").apply { isAccessible = true }
+            val manager = managerField.get(plugin) as? MethodChannel.MethodCallHandler ?: return
+
+            val channel = MethodChannel(messenger, "com.ryanheise.android_audio_manager")
+            channel.setMethodCallHandler { call, result ->
+                if (call.method == "requestAudioFocus") {
+                    val rawArgs = call.arguments as? List<*>
+                    val firstArg = rawArgs?.firstOrNull() as? Map<*, *>
+                    if (firstArg != null && !firstArg.containsKey("audioAttributes") && firstArg.containsKey("audioAttribute")) {
+                        val fixedMap = HashMap<Any?, Any?>(firstArg)
+                        fixedMap["audioAttributes"] = firstArg["audioAttribute"]
+                        val fixedCall = MethodCall(call.method, listOf(fixedMap))
+                        manager.onMethodCall(fixedCall, result)
+                        return@setMethodCallHandler
+                    }
+                }
+                manager.onMethodCall(call, result)
+            }
+        } catch (_: Exception) {}
+    }
+
     @Volatile
     private var currentWifiSsid: String? = null
     private var wifiNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingWidgetLaunchUri: String? = null
+
+    override fun shouldHandleDeeplinking(): Boolean = false
+
+    private fun captureWidgetLaunchFromIntent(intent: Intent?) {
+        if (intent == null) return
+        if (intent.action == HomeWidgetLaunchIntent.HOME_WIDGET_LAUNCH_ACTION) {
+            pendingWidgetLaunchUri = intent.data?.toString() ?: ""
+            intent.action = Intent.ACTION_MAIN
+            intent.data = null
+        }
+    }
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        captureWidgetLaunchFromIntent(intent)
+        super.onCreate(savedInstanceState)
+    }
 
     override fun onNewIntent(intent: Intent) {
+        captureWidgetLaunchFromIntent(intent)
         super.onNewIntent(intent)
         // Keep getIntent() current so a widget tap while the activity is alive can be
         // consumed by Flutter on resume.
@@ -106,11 +156,9 @@ class MainActivity : AudioServiceActivity() {
      * request has not been consumed yet) and clears it so subsequent resumes don't re-trigger.
      */
     private fun consumeWidgetLaunch(): String? {
-        val current = intent ?: return null
-        if (current.action != HomeWidgetLaunchIntent.HOME_WIDGET_LAUNCH_ACTION) return null
-        val uri = current.data?.toString() ?: ""
-        current.action = Intent.ACTION_MAIN
-        current.data = null
+        captureWidgetLaunchFromIntent(intent)
+        val uri = pendingWidgetLaunchUri
+        pendingWidgetLaunchUri = null
         return uri
     }
 
@@ -238,6 +286,7 @@ class MainActivity : AudioServiceActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         registerWifiCallbackIfNeeded()
+        fixAudioSessionFocusAttributes(flutterEngine)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, launchChannel).setMethodCallHandler { call, result ->
             if (call.method == "consumeWidgetLaunch") {

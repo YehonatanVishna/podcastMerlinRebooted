@@ -70,6 +70,9 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   StreamSubscription? _becomingNoisySub;
   bool _wasPlayingBeforeInterruption = false;
   bool _isInterrupted = false;
+  bool _isResumingFromInterruption = false;
+  int _resumeGeneration = 0;
+  Future<void>? _pendingInterruptionPause;
   int _playRequestId = 0;
 
   final Future<void> Function(String url)? urlLoader;
@@ -85,7 +88,7 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     this.urlLoader,
   })  : _db = db ?? DatabaseHelper.instance,
         _syncService = syncService ?? SyncService(),
-        _player = player ?? AudioPlayer(handleInterruptions: false) {
+        _player = player ?? AudioPlayer(handleInterruptions: false, handleAudioSessionActivation: false) {
     if (urlLoader == null) {
       _initAudioSession();
       _initPlayerListeners();
@@ -387,45 +390,70 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
 
   Future<void> _handleInterruption(AudioInterruptionEvent event) async {
     if (event.begin) {
-      switch (event.type) {
-        case AudioInterruptionType.duck:
-          if (audioFocusLossAction == AutoFocusLossAction.duck) {
-            await _player.setVolume(0.5).catchError((_) {});
-          } else {
-            if (!_isInterrupted) {
-              _wasPlayingBeforeInterruption = _player.playing || playbackState.value.playing;
-              _isInterrupted = true;
-            }
-            await pause();
+      if (event.type == AudioInterruptionType.duck &&
+          audioFocusLossAction == AutoFocusLossAction.duck) {
+        await _player.setVolume(0.5).catchError((_) {});
+        return;
+      }
+
+      final wasAlreadyInterruptedOrResuming =
+          _isInterrupted || _isResumingFromInterruption || _wasPlayingBeforeInterruption;
+      _resumeGeneration++;
+      _isResumingFromInterruption = false;
+      _isInterrupted = true;
+
+      if (!wasAlreadyInterruptedOrResuming) {
+        _wasPlayingBeforeInterruption =
+            _player.playing || playbackState.value.playing;
+      }
+
+      if (_pendingInterruptionPause != null) {
+        try {
+          await _pendingInterruptionPause;
+        } catch (_) {}
+      } else {
+        final pauseFuture = _pauseInternal(fromInterruption: true);
+        _pendingInterruptionPause = pauseFuture;
+        try {
+          await pauseFuture;
+        } finally {
+          if (_pendingInterruptionPause == pauseFuture) {
+            _pendingInterruptionPause = null;
           }
-          break;
-        case AudioInterruptionType.pause:
-        case AudioInterruptionType.unknown:
-          if (!_isInterrupted) {
-            _wasPlayingBeforeInterruption = _player.playing || playbackState.value.playing;
-            _isInterrupted = true;
-          }
-          await pause();
-          break;
+        }
       }
     } else {
-      switch (event.type) {
-        case AudioInterruptionType.duck:
-          if (audioFocusLossAction == AutoFocusLossAction.duck) {
-            await _player.setVolume(1.0).catchError((_) {});
-          } else {
-            await _resumeAfterInterruption();
-          }
-          break;
-        case AudioInterruptionType.pause:
-          if (audioFocusLossAction == AutoFocusLossAction.duck) {
-            await _player.setVolume(1.0).catchError((_) {});
-          }
-          await _resumeAfterInterruption();
-          break;
-        case AudioInterruptionType.unknown:
-          break;
+      // [CR-05] Do not auto-resume on permanent focus loss
+      if (event.type == AudioInterruptionType.unknown) {
+        _wasPlayingBeforeInterruption = false;
+        _isInterrupted = false;
+        _isResumingFromInterruption = false;
+        return;
       }
+
+      if (event.type == AudioInterruptionType.duck &&
+          audioFocusLossAction == AutoFocusLossAction.duck) {
+        await _player.setVolume(1.0).catchError((_) {});
+        return;
+      }
+
+      final capturedGeneration = _resumeGeneration;
+      if (_pendingInterruptionPause != null) {
+        try {
+          await _pendingInterruptionPause;
+        } catch (_) {}
+      }
+
+      // [CR-04] If another interruption started while waiting on pause, abort resumption
+      if (capturedGeneration != _resumeGeneration || !_isInterrupted) {
+        return;
+      }
+
+      if (audioFocusLossAction == AutoFocusLossAction.duck) {
+        await _player.setVolume(1.0).catchError((_) {});
+      }
+
+      await _resumeAfterInterruption();
     }
   }
 
@@ -438,26 +466,47 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   @visibleForTesting
   bool get isInterruptedForTesting => _isInterrupted;
 
+  @visibleForTesting
+  bool get isResumingFromInterruptionForTesting => _isResumingFromInterruption;
+
   Future<void> _resumeAfterInterruption() async {
     final shouldResume = _wasPlayingBeforeInterruption;
     _isInterrupted = false;
-    _wasPlayingBeforeInterruption = false;
 
-    if (shouldResume && !playbackState.value.playing) {
-      // 1. Brief settle delay allowing car Bluetooth hardware relay / SCO to settle
-      await Future.delayed(const Duration(milliseconds: 250));
+    if (!shouldResume) {
+      _isResumingFromInterruption = false;
+      return;
+    }
 
-      // 2. Smart Resume Rewind (1.5 seconds)
-      // This absorbs Bluetooth A2DP audio unmute latency and restarts the A2DP stream,
-      // forcing older vehicle head units to unmute their hardware amplifier.
-      try {
-        final currentPos = _player.position;
-        final rewindTarget = currentPos - const Duration(milliseconds: 1500);
-        await seek(rewindTarget < Duration.zero ? Duration.zero : rewindTarget);
-      } catch (_) {}
+    _isResumingFromInterruption = true;
+    final generation = ++_resumeGeneration;
 
-      // 3. Resume playback
+    // 1. Brief settle delay allowing car Bluetooth hardware relay / SCO to settle
+    await Future.delayed(const Duration(milliseconds: 250));
+    if (generation != _resumeGeneration) return;
+
+    // 2. Smart Resume Rewind (1.5 seconds)
+    // This absorbs Bluetooth A2DP audio unmute latency and restarts the A2DP stream,
+    // forcing older vehicle head units to unmute their hardware amplifier.
+    try {
+      final currentPos = (urlLoader != null || _player.audioSource == null)
+          ? playbackState.value.position
+          : _player.position;
+      final rewindTarget = currentPos - const Duration(milliseconds: 1500);
+      await seek(rewindTarget < Duration.zero ? Duration.zero : rewindTarget)
+          .timeout(const Duration(milliseconds: 500));
+    } catch (_) {}
+
+    if (generation != _resumeGeneration) return;
+
+    // 3. Resume playback
+    try {
       await play();
+    } finally {
+      if (generation == _resumeGeneration) {
+        _wasPlayingBeforeInterruption = false;
+        _isResumingFromInterruption = false;
+      }
     }
   }
 
@@ -910,10 +959,30 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
       }
 
       await _setActiveAudioSession(true);
-      await _player.play();
+      unawaited(_player.play().catchError((e) {
+        if (kDebugMode) print('AudioPlayerService play error: $e');
+        _stopPeriodicPositionSync();
+        final errorMsg = formatAudioBackendError(e);
+        final errorState = playbackState.value.copyWith(
+          playing: false,
+          processingState: AudioProcessingState.idle,
+          controls: [
+            MediaControl.rewind,
+            MediaControl.play,
+            MediaControl.fastForward,
+            if (_queue.isNotEmpty) MediaControl.skipToNext,
+            MediaControl.stop,
+          ],
+        );
+        playbackState.add(errorState);
+        if (!_playbackErrorController.isClosed) {
+          _playbackErrorController.add(errorMsg);
+        }
+      }));
       _startPeriodicPositionSync();
     } catch (e) {
       if (kDebugMode) print('AudioPlayerService play error: $e');
+      _stopPeriodicPositionSync();
       final errorMsg = formatAudioBackendError(e);
       final errorState = playbackState.value.copyWith(
         playing: false,
@@ -933,38 +1002,45 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
-  @override
-  Future<void> pause() async {
+  Future<void> _pauseInternal({bool fromInterruption = false}) async {
     _playRequestId++;
-    if (!_isInterrupted) {
+    if (!fromInterruption) {
       _wasPlayingBeforeInterruption = false;
+      _isInterrupted = false;
+      _isResumingFromInterruption = false;
+      _resumeGeneration++;
     }
+    playbackState.add(playbackState.value.copyWith(
+      playing: false,
+      controls: [
+        MediaControl.rewind,
+        MediaControl.play,
+        MediaControl.fastForward,
+        if (_queue.isNotEmpty) MediaControl.skipToNext,
+        MediaControl.stop,
+      ],
+    ));
+    _stopPeriodicPositionSync();
     try {
       if (urlLoader != null) {
-        playbackState.add(playbackState.value.copyWith(playing: false));
-        _stopPeriodicPositionSync();
-        await _enqueueCurrentPositionAction();
+        unawaited(_enqueueCurrentPositionAction());
         return;
       }
       await _player.pause();
-      playbackState.add(playbackState.value.copyWith(
-        playing: false,
-        controls: [
-          MediaControl.rewind,
-          MediaControl.play,
-          MediaControl.fastForward,
-          if (_queue.isNotEmpty) MediaControl.skipToNext,
-          MediaControl.stop,
-        ],
-      ));
-      _stopPeriodicPositionSync();
-      await _enqueueCurrentPositionAction();
+      unawaited(_enqueueCurrentPositionAction());
     } catch (_) {}
   }
 
   @override
+  Future<void> pause() => _pauseInternal(fromInterruption: false);
+
+  @override
   Future<void> stop() async {
     _playRequestId++;
+    _resumeGeneration++;
+    _isResumingFromInterruption = false;
+    _wasPlayingBeforeInterruption = false;
+    _isInterrupted = false;
     try {
       if (urlLoader != null) {
         playbackState.add(playbackState.value.copyWith(playing: false));
@@ -1477,6 +1553,8 @@ class MerlinAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   void dispose() {
+    _resumeGeneration++;
+    _isResumingFromInterruption = false;
     PodcastWidgetService.instance.dispose();
     LinuxMprisService.instance.dispose();
     _stopPeriodicPositionSync();
