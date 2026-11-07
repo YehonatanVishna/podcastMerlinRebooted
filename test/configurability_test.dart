@@ -59,6 +59,7 @@ class MockGPodderApiClient extends GPodderApiClient {
     required String serverUrl,
     required String username,
     required String password,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     pingCount++;
     return pingResult;
@@ -70,6 +71,7 @@ class MockGPodderApiClient extends GPodderApiClient {
     required String username,
     required String password,
     int sinceTimestamp = 0,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     return {'add': <String>[], 'remove': <String>[], 'timestamp': 100};
   }
@@ -80,6 +82,7 @@ class MockGPodderApiClient extends GPodderApiClient {
     required String username,
     required String password,
     int sinceTimestamp = 0,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     return [];
   }

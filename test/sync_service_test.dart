@@ -20,6 +20,7 @@ class TestGPodderApiClient extends GPodderApiClient {
     required String serverUrl,
     required String username,
     required String password,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     return pingShouldSucceed;
   }
@@ -31,6 +32,7 @@ class TestGPodderApiClient extends GPodderApiClient {
     required String password,
     required List<String> addUrls,
     required List<String> removeUrls,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     return shouldSucceed;
   }
@@ -41,6 +43,7 @@ class TestGPodderApiClient extends GPodderApiClient {
     required String username,
     required String password,
     required List<GPodderAction> actions,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     return shouldSucceed;
   }
@@ -51,6 +54,7 @@ class TestGPodderApiClient extends GPodderApiClient {
     required String username,
     required String password,
     int sinceTimestamp = 0,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     if (!shouldSucceed) return null;
     return mockSubscriptionResponse;
@@ -64,6 +68,7 @@ class TestGPodderApiClient extends GPodderApiClient {
     required String username,
     required String password,
     int sinceTimestamp = 0,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     lastFetchActionsSinceTs = sinceTimestamp;
     if (!shouldSucceed) return [];

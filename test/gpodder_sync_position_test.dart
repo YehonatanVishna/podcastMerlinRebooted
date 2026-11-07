@@ -18,6 +18,7 @@ class MockGPodderApiClient extends GPodderApiClient {
     required String username,
     required String password,
     required List<GPodderAction> actions,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     if (!shouldSucceed) return false;
     uploadedActions.addAll(actions);
