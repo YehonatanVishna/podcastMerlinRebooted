@@ -87,6 +87,7 @@ class SyncService {
     final serverUrl = await _storage.read(SecureStorageService.keyServerUrl);
     final username = await _storage.read(SecureStorageService.keyUsername);
     final password = await _storage.read(SecureStorageService.keyPassword);
+    final deviceId = await _storage.read(SecureStorageService.keyDeviceId) ?? 'podcast_merlin_flutter';
 
     final isGpodderConfigured = serverUrl != null && serverUrl.trim().isNotEmpty &&
         username != null && username.trim().isNotEmpty &&
@@ -125,6 +126,7 @@ class SyncService {
       serverUrl: serverUrl,
       username: username,
       password: password,
+      deviceId: deviceId,
     );
 
     if (!isOnline) {
@@ -138,8 +140,8 @@ class SyncService {
     try {
       // 1. Push pending subscription backlog & pending play actions
       onProgress?.call(SyncStage.pushingActions, 'Pushing local backlog to gPodder...');
-      await _pushPendingSubscriptionChanges(serverUrl, username, password);
-      final pushedOk = await _pushPendingActions(serverUrl, username, password);
+      await _pushPendingSubscriptionChanges(serverUrl, username, password, deviceId);
+      final pushedOk = await _pushPendingActions(serverUrl, username, password, deviceId);
       if (!pushedOk) {
         lastFeedWarnings.add('Failed to push offline playback actions to gPodder server.');
       }
@@ -173,6 +175,7 @@ class SyncService {
         username: username,
         password: password,
         sinceTimestamp: fetchSubSinceTs,
+        deviceId: deviceId,
       );
 
       if (subResponse == null) {
@@ -281,6 +284,7 @@ class SyncService {
         username: username,
         password: password,
         sinceTimestamp: fetchActionSinceTs,
+        deviceId: deviceId,
       );
 
       // Fallback: If an incremental fetch returned 0 actions and local database has no playback progress,
@@ -293,6 +297,7 @@ class SyncService {
             username: username,
             password: password,
             sinceTimestamp: 0,
+            deviceId: deviceId,
           );
         }
       }
@@ -409,6 +414,7 @@ class SyncService {
     final serverUrl = await _storage.read(SecureStorageService.keyServerUrl);
     final username = await _storage.read(SecureStorageService.keyUsername);
     final password = await _storage.read(SecureStorageService.keyPassword);
+    final deviceId = await _storage.read(SecureStorageService.keyDeviceId) ?? 'podcast_merlin_flutter';
 
     if (serverUrl == null || username == null || password == null ||
         serverUrl.isEmpty || username.isEmpty || password.isEmpty) {
@@ -419,19 +425,25 @@ class SyncService {
       serverUrl: serverUrl,
       username: username,
       password: password,
+      deviceId: deviceId,
     );
 
     if (!isOnline) {
       return false;
     }
 
-    final subOk = await _pushPendingSubscriptionChanges(serverUrl, username, password);
-    final actionOk = await _pushPendingActions(serverUrl, username, password);
+    final subOk = await _pushPendingSubscriptionChanges(serverUrl, username, password, deviceId);
+    final actionOk = await _pushPendingActions(serverUrl, username, password, deviceId);
     return subOk && actionOk;
   }
 
   /// Push enqueued subscription add/remove backlog to gPodder server
-  Future<bool> _pushPendingSubscriptionChanges(String serverUrl, String username, String password) async {
+  Future<bool> _pushPendingSubscriptionChanges(
+    String serverUrl,
+    String username,
+    String password, [
+    String deviceId = 'podcast_merlin_flutter',
+  ]) async {
     final pendingMap = await _db.getPendingSubscriptionChanges();
     final addList = (pendingMap['add'] as List?)?.cast<String>() ?? [];
     final removeList = (pendingMap['remove'] as List?)?.cast<String>() ?? [];
@@ -445,6 +457,7 @@ class SyncService {
       password: password,
       addUrls: addList,
       removeUrls: removeList,
+      deviceId: deviceId,
     );
 
     if (success && maxId > 0) {
@@ -463,17 +476,23 @@ class SyncService {
     final serverUrl = await _storage.read(SecureStorageService.keyServerUrl);
     final username = await _storage.read(SecureStorageService.keyUsername);
     final password = await _storage.read(SecureStorageService.keyPassword);
+    final deviceId = await _storage.read(SecureStorageService.keyDeviceId) ?? 'podcast_merlin_flutter';
 
     if (serverUrl == null || username == null || password == null ||
         serverUrl.isEmpty || username.isEmpty || password.isEmpty) {
       return false;
     }
 
-    return _pushPendingActions(serverUrl, username, password);
+    return _pushPendingActions(serverUrl, username, password, deviceId);
   }
 
   /// Pushes enqueued offline actions to server after collapsing duplicates
-  Future<bool> _pushPendingActions(String serverUrl, String username, String password) async {
+  Future<bool> _pushPendingActions(
+    String serverUrl,
+    String username,
+    String password, [
+    String deviceId = 'podcast_merlin_flutter',
+  ]) async {
     if (_isPushingActions) {
       _needsRepush = true;
       return true;
@@ -491,6 +510,7 @@ class SyncService {
           username: username,
           password: password,
           actions: collapsed,
+          deviceId: deviceId,
         );
 
         if (success) {

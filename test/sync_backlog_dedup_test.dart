@@ -19,6 +19,7 @@ class MockDeduplicationApiClient extends GPodderApiClient {
     required String serverUrl,
     required String username,
     required String password,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     pingCallCount++;
     return isServerOnline;
@@ -31,8 +32,14 @@ class MockDeduplicationApiClient extends GPodderApiClient {
     required String password,
     required List<String> addUrls,
     required List<String> removeUrls,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
-    final online = await pingServer(serverUrl: serverUrl, username: username, password: password);
+    final online = await pingServer(
+      serverUrl: serverUrl,
+      username: username,
+      password: password,
+      deviceId: deviceId,
+    );
     if (!online) return false;
     uploadedAdds.addAll(addUrls);
     uploadedRemoves.addAll(removeUrls);
@@ -45,8 +52,14 @@ class MockDeduplicationApiClient extends GPodderApiClient {
     required String username,
     required String password,
     required List<GPodderAction> actions,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
-    final online = await pingServer(serverUrl: serverUrl, username: username, password: password);
+    final online = await pingServer(
+      serverUrl: serverUrl,
+      username: username,
+      password: password,
+      deviceId: deviceId,
+    );
     if (!online) return false;
     uploadedEpisodeActions.addAll(actions);
     return true;
@@ -58,8 +71,14 @@ class MockDeduplicationApiClient extends GPodderApiClient {
     required String username,
     required String password,
     int sinceTimestamp = 0,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
-    final online = await pingServer(serverUrl: serverUrl, username: username, password: password);
+    final online = await pingServer(
+      serverUrl: serverUrl,
+      username: username,
+      password: password,
+      deviceId: deviceId,
+    );
     if (!online) return null;
     return {'add': <String>[], 'remove': <String>[], 'timestamp': 1000};
   }
@@ -70,8 +89,14 @@ class MockDeduplicationApiClient extends GPodderApiClient {
     required String username,
     required String password,
     int sinceTimestamp = 0,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
-    final online = await pingServer(serverUrl: serverUrl, username: username, password: password);
+    final online = await pingServer(
+      serverUrl: serverUrl,
+      username: username,
+      password: password,
+      deviceId: deviceId,
+    );
     if (!online) return [];
     return [];
   }

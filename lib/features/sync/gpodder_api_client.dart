@@ -18,6 +18,7 @@ class GPodderApiClient {
   final Dio _dio;
   String? lastError;
   int? lastEpisodeActionTimestamp;
+  final Set<String> _registeredDevices = {};
 
   GPodderApiClient({Dio? dio})
       : _dio = dio ??
@@ -33,6 +34,39 @@ class GPodderApiClient {
               ),
             );
 
+  String _cleanRootUrl(String serverUrl) {
+    var url = serverUrl.trim();
+    if (url.isEmpty) return url;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://$url';
+    }
+    while (url.endsWith('/')) {
+      url = url.substring(0, url.length - 1);
+    }
+    final suffixes = [
+      '/index.php/apps/gpoddersync',
+      '/index.php/apps/gpodder',
+      '/apps/gpoddersync',
+      '/apps/gpodder',
+      '/index.php',
+      '/api/2',
+    ];
+    for (final suffix in suffixes) {
+      if (url.toLowerCase().endsWith(suffix)) {
+        url = url.substring(0, url.length - suffix.length);
+        while (url.endsWith('/')) {
+          url = url.substring(0, url.length - 1);
+        }
+      }
+    }
+    return url;
+  }
+
+  bool _isStandardGpodderServer(String serverUrl) {
+    final lower = serverUrl.trim().toLowerCase();
+    return lower.contains('gpodder.net') || lower.contains('/api/2');
+  }
+
   String _formatBaseUrl(String serverUrl) {
     var url = serverUrl.trim();
     if (url.isEmpty) return url;
@@ -45,14 +79,69 @@ class GPodderApiClient {
     if (url.endsWith('/index.php')) {
       url = url.substring(0, url.length - 10);
     }
-    final lower = url.toLowerCase();
-    if (lower.contains('gpodder.net')) {
-      return url;
+    if (_isStandardGpodderServer(url)) {
+      return _cleanRootUrl(url);
     }
+    final lower = url.toLowerCase();
     if (!lower.contains('/apps/gpoddersync') && !lower.contains('/apps/gpodder')) {
       url = '$url/index.php/apps/gpoddersync';
     }
     return url;
+  }
+
+  String _normalizeDeviceId(String? deviceId) {
+    final trimmed = deviceId?.trim() ?? '';
+    return trimmed.isEmpty ? 'podcast_merlin_flutter' : trimmed;
+  }
+
+  bool _shouldTryNextEndpoint(int? statusCode) {
+    return statusCode == 301 ||
+        statusCode == 302 ||
+        statusCode == 307 ||
+        statusCode == 308 ||
+        statusCode == 400 ||
+        statusCode == 404 ||
+        statusCode == 405;
+  }
+
+  bool _isHtmlResponse(dynamic data) {
+    if (data is String) {
+      final trimmed = data.trimLeft().toLowerCase();
+      return trimmed.startsWith('<!doctype html') || trimmed.startsWith('<html');
+    }
+    return false;
+  }
+
+  Future<void> _ensureDeviceRegistered({
+    required String rootUrl,
+    required String username,
+    required String password,
+    required String deviceId,
+    bool force = false,
+  }) async {
+    final key = '$rootUrl|$username|$deviceId';
+    if (!force && _registeredDevices.contains(key)) return;
+    final encUser = Uri.encodeComponent(username.trim());
+    final encDevice = Uri.encodeComponent(deviceId);
+    try {
+      final res = await _dio.post(
+        '$rootUrl/api/2/devices/$encUser/$encDevice.json',
+        data: {
+          'caption': 'Podcast Merlin',
+          'type': 'desktop',
+        },
+        options: _getAuthOptions(username, password).copyWith(
+          connectTimeout: const Duration(seconds: 10),
+          sendTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+        ),
+      );
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        _registeredDevices.add(key);
+      }
+    } catch (_) {
+      // Best-effort registration; some servers do not implement /api/2/devices
+    }
   }
 
   Options _getAuthOptions(String username, String password) {
@@ -91,26 +180,68 @@ class GPodderApiClient {
     required String serverUrl,
     required String username,
     required String password,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     if (serverUrl.trim().isEmpty || username.trim().isEmpty || password.trim().isEmpty) {
       lastError = 'Server credentials not configured.';
       return false;
     }
     try {
+      final rootUrl = _cleanRootUrl(serverUrl);
       final baseUrl = _formatBaseUrl(serverUrl);
-      final response = await _dio.get(
-        '$baseUrl/subscriptions?since=2147483647',
-        options: _getAuthOptions(username, password).copyWith(
-          connectTimeout: const Duration(seconds: 8),
-          sendTimeout: const Duration(seconds: 15),
-          receiveTimeout: const Duration(seconds: 15),
-        ),
+      final encUser = Uri.encodeComponent(username.trim());
+      final isStandard = _isStandardGpodderServer(serverUrl);
+      final authOpts = _getAuthOptions(username, password).copyWith(
+        connectTimeout: const Duration(seconds: 8),
+        sendTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 15),
       );
-      if (response.statusCode == 200) {
-        lastError = null;
-        return true;
+
+      final attempts = <({String method, String url})>[
+        if (isStandard) ...[
+          (method: 'POST', url: '$rootUrl/api/2/auth/$encUser/login.json'),
+          (method: 'GET', url: '$rootUrl/subscriptions/$encUser.json'),
+          (method: 'GET', url: '$rootUrl/api/2/episodes/$encUser.json?since=2147483647'),
+        ] else ...[
+          (method: 'GET', url: '$baseUrl/subscriptions?since=2147483647'),
+          (method: 'POST', url: '$rootUrl/api/2/auth/$encUser/login.json'),
+          (method: 'GET', url: '$rootUrl/subscriptions/$encUser.json'),
+          (method: 'GET', url: '$rootUrl/api/2/episodes/$encUser.json?since=2147483647'),
+        ],
+      ];
+
+      DioException? lastDioErr;
+      int? lastStatusCode;
+
+      for (final attempt in attempts) {
+        try {
+          final Response response;
+          if (attempt.method == 'POST') {
+            response = await _dio.post(attempt.url, options: authOpts);
+          } else {
+            response = await _dio.get(attempt.url, options: authOpts);
+          }
+          lastStatusCode = response.statusCode;
+          if (response.statusCode == 200) {
+            if (attempt.method == 'GET' && _isHtmlResponse(response.data)) {
+              continue;
+            }
+            lastError = null;
+            return true;
+          }
+        } on DioException catch (dioErr) {
+          lastDioErr = dioErr;
+          if (_shouldTryNextEndpoint(dioErr.response?.statusCode)) {
+            continue;
+          }
+          rethrow;
+        }
       }
-      lastError = 'gPodder server ping returned HTTP status ${response.statusCode}';
+
+      if (lastDioErr != null) {
+        throw lastDioErr;
+      }
+      lastError = 'gPodder server ping returned HTTP status ${lastStatusCode ?? "unknown"}';
       return false;
     } catch (e) {
       if (kDebugMode) print('pingServer error: $e');
@@ -124,6 +255,7 @@ class GPodderApiClient {
     required String serverUrl,
     required String username,
     required String password,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     if (serverUrl.trim().isEmpty) {
       return 'Server URL cannot be empty.';
@@ -131,7 +263,12 @@ class GPodderApiClient {
     if (username.trim().isEmpty || password.trim().isEmpty) {
       return 'Username and password cannot be empty.';
     }
-    final ok = await pingServer(serverUrl: serverUrl, username: username, password: password);
+    final ok = await pingServer(
+      serverUrl: serverUrl,
+      username: username,
+      password: password,
+      deviceId: deviceId,
+    );
     return ok ? null : (lastError ?? 'Connection failed');
   }
 
@@ -140,11 +277,13 @@ class GPodderApiClient {
     required String serverUrl,
     required String username,
     required String password,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     return pingServer(
       serverUrl: serverUrl,
       username: username,
       password: password,
+      deviceId: deviceId,
     );
   }
 
@@ -154,6 +293,7 @@ class GPodderApiClient {
     required String username,
     required String password,
     int sinceTimestamp = 0,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     if (serverUrl.trim().isEmpty || username.trim().isEmpty || password.trim().isEmpty) {
       lastError = 'Server credentials not configured.';
@@ -161,25 +301,44 @@ class GPodderApiClient {
     }
 
     try {
+      final rootUrl = _cleanRootUrl(serverUrl);
       final baseUrl = _formatBaseUrl(serverUrl);
+      final encUser = Uri.encodeComponent(username.trim());
+      final normDevice = _normalizeDeviceId(deviceId);
+      final encDevice = Uri.encodeComponent(normDevice);
+      final isStandard = _isStandardGpodderServer(serverUrl);
       final options = _getAuthOptions(username, password);
+
+      if (isStandard) {
+        await _ensureDeviceRegistered(
+          rootUrl: rootUrl,
+          username: username,
+          password: password,
+          deviceId: normDevice,
+        );
+      }
 
       final queryParam = sinceTimestamp > 0 ? '?since=$sinceTimestamp' : '';
       final urlsToTry = <String>[
-        '$baseUrl/subscriptions$queryParam',
-        if (sinceTimestamp == 0) '$baseUrl/subscriptions?since=0',
+        if (isStandard) ...[
+          '$rootUrl/api/2/subscriptions/$encUser/$encDevice.json$queryParam',
+          if (sinceTimestamp == 0) '$rootUrl/api/2/subscriptions/$encUser/$encDevice.json?since=0',
+          '$rootUrl/subscriptions/$encUser/$encDevice.json',
+          '$rootUrl/subscriptions/$encUser.json',
+        ] else ...[
+          '$baseUrl/subscriptions$queryParam',
+          if (sinceTimestamp == 0) '$baseUrl/subscriptions?since=0',
+          if (baseUrl.contains('/index.php/'))
+            '${baseUrl.replaceFirst('/index.php/', '/')}/subscriptions$queryParam'
+          else
+            '$baseUrl/index.php/apps/gpoddersync/subscriptions$queryParam',
+          '$rootUrl/api/2/subscriptions/$encUser/$encDevice.json$queryParam',
+          '$rootUrl/subscriptions/$encUser.json',
+        ],
       ];
-      if (baseUrl.contains('/index.php/')) {
-        urlsToTry.add('${baseUrl.replaceFirst('/index.php/', '/')}/subscriptions$queryParam');
-      } else if (!baseUrl.contains('gpodder.net')) {
-        urlsToTry.add('$baseUrl/index.php/apps/gpoddersync/subscriptions$queryParam');
-      }
-      final cleanServerUrl = serverUrl.trim().endsWith('/')
-          ? serverUrl.trim().substring(0, serverUrl.trim().length - 1)
-          : serverUrl.trim();
-      urlsToTry.add('$cleanServerUrl/api/2/subscriptions/$username.json$queryParam');
 
       Response? response;
+      String? matchedUrl;
       DioException? lastDioException;
 
       for (final targetUrl in urlsToTry) {
@@ -201,14 +360,13 @@ class GPodderApiClient {
             }
             if (data is Map || data is List) {
               response = res;
+              matchedUrl = targetUrl;
               break;
             }
           }
         } on DioException catch (dioErr) {
           lastDioException = dioErr;
-          if (dioErr.response?.statusCode == 404 ||
-              dioErr.response?.statusCode == 400 ||
-              dioErr.response?.statusCode == 405) {
+          if (_shouldTryNextEndpoint(dioErr.response?.statusCode)) {
             continue;
           }
           rethrow;
@@ -248,6 +406,41 @@ class GPodderApiClient {
           final addList = _extractUrls(addRaw);
           final removeList = _extractUrls(removeRaw);
 
+          // On initial sync (sinceTimestamp == 0) with standard gPodder v2 device endpoints,
+          // also merge account-wide subscriptions (/subscriptions/<user>.json) so subscriptions
+          // from other devices on the same gpodder.net account are discovered immediately.
+          if (sinceTimestamp == 0 &&
+              matchedUrl != null &&
+              matchedUrl.contains('/api/2/subscriptions/')) {
+            try {
+              final allRes = await _dio.get(
+                '$rootUrl/subscriptions/$encUser.json',
+                options: options,
+              );
+              if (allRes.statusCode == 200 && allRes.data != null) {
+                dynamic allDecoded = allRes.data;
+                if (allDecoded is String) {
+                  final trimmed = allDecoded.trim();
+                  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+                    try {
+                      allDecoded = jsonDecode(trimmed);
+                    } catch (_) {}
+                  }
+                }
+                final accountUrls = _extractUrls(allDecoded);
+                final existingSet = {...addList, ...removeList};
+                for (final url in accountUrls) {
+                  if (!existingSet.contains(url)) {
+                    addList.add(url);
+                    existingSet.add(url);
+                  }
+                }
+              }
+            } catch (_) {
+              // Best-effort merge of account-wide subscriptions
+            }
+          }
+
           int parsedTs = sinceTimestamp;
           final tsRaw = map['timestamp'];
           if (tsRaw is num) {
@@ -279,23 +472,55 @@ class GPodderApiClient {
     required String password,
     required List<String> addUrls,
     required List<String> removeUrls,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     if (addUrls.isEmpty && removeUrls.isEmpty) return true;
 
     try {
+      final rootUrl = _cleanRootUrl(serverUrl);
       final baseUrl = _formatBaseUrl(serverUrl);
+      final encUser = Uri.encodeComponent(username.trim());
+      final normDevice = _normalizeDeviceId(deviceId);
+      final encDevice = Uri.encodeComponent(normDevice);
+      final isStandard = _isStandardGpodderServer(serverUrl);
+
+      if (isStandard) {
+        await _ensureDeviceRegistered(
+          rootUrl: rootUrl,
+          username: username,
+          password: password,
+          deviceId: normDevice,
+        );
+      }
+
       final payload = {
         'add': addUrls,
         'remove': removeUrls,
       };
+      final v2Url = '$rootUrl/api/2/subscriptions/$encUser/$encDevice.json';
       final urlsToTry = <String>[
-        '$baseUrl/subscription_change/create',
-        '$baseUrl/subscriptions',
+        if (isStandard) ...[
+          v2Url,
+          '$baseUrl/subscription_change/create',
+          '$baseUrl/subscriptions',
+        ] else ...[
+          '$baseUrl/subscription_change/create',
+          '$baseUrl/subscriptions',
+          v2Url,
+        ],
       ];
       Response? response;
       DioException? lastDioException;
       for (final targetUrl in urlsToTry) {
         try {
+          if (!isStandard && targetUrl == v2Url) {
+            await _ensureDeviceRegistered(
+              rootUrl: rootUrl,
+              username: username,
+              password: password,
+              deviceId: normDevice,
+            );
+          }
           final res = await _dio.post(
             targetUrl,
             data: payload,
@@ -307,7 +532,29 @@ class GPodderApiClient {
           }
         } on DioException catch (dioErr) {
           lastDioException = dioErr;
-          if (dioErr.response?.statusCode == 404) {
+          if (targetUrl == v2Url && dioErr.response?.statusCode == 404) {
+            await _ensureDeviceRegistered(
+              rootUrl: rootUrl,
+              username: username,
+              password: password,
+              deviceId: normDevice,
+              force: true,
+            );
+            try {
+              final retryRes = await _dio.post(
+                targetUrl,
+                data: payload,
+                options: _getAuthOptions(username, password),
+              );
+              if (retryRes.statusCode == 200 || retryRes.statusCode == 201) {
+                response = retryRes;
+                break;
+              }
+            } on DioException catch (retryErr) {
+              lastDioException = retryErr;
+            }
+          }
+          if (_shouldTryNextEndpoint(dioErr.response?.statusCode)) {
             continue;
           }
           rethrow;
@@ -333,6 +580,7 @@ class GPodderApiClient {
     required String username,
     required String password,
     int sinceTimestamp = 0,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     lastEpisodeActionTimestamp = null;
     if (serverUrl.trim().isEmpty || username.trim().isEmpty || password.trim().isEmpty) {
@@ -341,25 +589,30 @@ class GPodderApiClient {
     }
 
     try {
+      final rootUrl = _cleanRootUrl(serverUrl);
       final baseUrl = _formatBaseUrl(serverUrl);
+      final encUser = Uri.encodeComponent(username.trim());
+      final isStandard = _isStandardGpodderServer(serverUrl);
       final options = _getAuthOptions(username, password).copyWith(
         receiveTimeout: const Duration(seconds: 90),
       );
 
       final queryParam = sinceTimestamp > 0 ? '?since=$sinceTimestamp' : '';
       final urlsToTry = <String>[
-        '$baseUrl/episode_action$queryParam',
-        if (sinceTimestamp == 0) '$baseUrl/episode_action?since=0',
+        if (isStandard) ...[
+          '$rootUrl/api/2/episodes/$encUser.json$queryParam',
+          if (sinceTimestamp == 0) '$rootUrl/api/2/episodes/$encUser.json?since=0',
+          '$baseUrl/episode_action$queryParam',
+        ] else ...[
+          '$baseUrl/episode_action$queryParam',
+          if (sinceTimestamp == 0) '$baseUrl/episode_action?since=0',
+          if (baseUrl.contains('/index.php/'))
+            '${baseUrl.replaceFirst('/index.php/', '/')}/episode_action$queryParam'
+          else
+            '$baseUrl/index.php/apps/gpoddersync/episode_action$queryParam',
+          '$rootUrl/api/2/episodes/$encUser.json$queryParam',
+        ],
       ];
-      if (baseUrl.contains('/index.php/')) {
-        urlsToTry.add('${baseUrl.replaceFirst('/index.php/', '/')}/episode_action$queryParam');
-      } else if (!baseUrl.contains('gpodder.net')) {
-        urlsToTry.add('$baseUrl/index.php/apps/gpoddersync/episode_action$queryParam');
-      }
-      final cleanServerUrl = serverUrl.trim().endsWith('/')
-          ? serverUrl.trim().substring(0, serverUrl.trim().length - 1)
-          : serverUrl.trim();
-      urlsToTry.add('$cleanServerUrl/api/2/episodes/$username.json$queryParam');
 
       Response? response;
       DioException? lastDioException;
@@ -388,9 +641,7 @@ class GPodderApiClient {
           }
         } on DioException catch (dioErr) {
           lastDioException = dioErr;
-          if (dioErr.response?.statusCode == 404 ||
-              dioErr.response?.statusCode == 400 ||
-              dioErr.response?.statusCode == 405) {
+          if (_shouldTryNextEndpoint(dioErr.response?.statusCode)) {
             continue;
           }
           rethrow;
@@ -474,15 +725,27 @@ class GPodderApiClient {
     required String username,
     required String password,
     required List<GPodderAction> actions,
+    String deviceId = 'podcast_merlin_flutter',
   }) async {
     if (actions.isEmpty) return true;
 
     try {
+      final rootUrl = _cleanRootUrl(serverUrl);
       final baseUrl = _formatBaseUrl(serverUrl);
+      final encUser = Uri.encodeComponent(username.trim());
+      final isStandard = _isStandardGpodderServer(serverUrl);
       final payload = actions.map((a) => a.toApiJson()).toList();
+      final v2Url = '$rootUrl/api/2/episodes/$encUser.json';
       final urlsToTry = <String>[
-        '$baseUrl/episode_action/create',
-        '$baseUrl/episode_actions',
+        if (isStandard) ...[
+          v2Url,
+          '$baseUrl/episode_action/create',
+          '$baseUrl/episode_actions',
+        ] else ...[
+          '$baseUrl/episode_action/create',
+          '$baseUrl/episode_actions',
+          v2Url,
+        ],
       ];
       Response? response;
       DioException? lastDioException;
@@ -499,7 +762,7 @@ class GPodderApiClient {
           }
         } on DioException catch (dioErr) {
           lastDioException = dioErr;
-          if (dioErr.response?.statusCode == 404) {
+          if (_shouldTryNextEndpoint(dioErr.response?.statusCode)) {
             continue;
           }
           rethrow;

@@ -268,6 +268,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       serverUrl: _serverController.text.trim(),
       username: _userController.text.trim(),
       password: _passwordController.text.trim(),
+      deviceId: _deviceIdController.text.trim().isNotEmpty
+          ? _deviceIdController.text.trim()
+          : 'podcast_merlin_flutter',
     );
 
     if (!mounted) return;
@@ -275,7 +278,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       _isTesting = false;
       _isSuccessStatus = errorDetail == null;
       _statusMessage = errorDetail == null
-          ? 'Connected successfully to Nextcloud gPodder!'
+          ? 'Connected successfully to gPodder / Nextcloud server!'
           : 'Connection failed: $errorDetail';
     });
   }
